@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+    color: #ffffff;
+    background: #08111f;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    min-height: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background: #08111f;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgba(103, 232, 249, 0.95);
+    outline-offset: 3px;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .panel-surface {
+    @apply rounded-[28px] border border-white/10 bg-slate-950/55 p-6 shadow-md shadow-slate-950/30;
+  }
+
+  .panel-subtle {
+    @apply rounded-2xl border border-white/10 bg-white/[0.04];
+  }
+
+  .toolbar-field {
+    @apply min-h-[48px] rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-300;
+  }
+
+  .toolbar-label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500;
+  }
+
+  .field-label {
+    @apply text-sm font-medium text-slate-100;
+  }
+
+  .field-hint {
+    @apply mt-1 text-xs text-slate-400;
+  }
+
+  .muted-copy {
+    @apply text-sm text-slate-300;
+  }
+
+  .state-card {
+    @apply rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-5 text-sm text-slate-300;
+  }
+
+  .table-shell {
+    @apply mt-6 overflow-hidden rounded-[24px] border border-white/10 bg-slate-950/35;
+  }
+
+  .table-head {
+    @apply hidden gap-3 border-b border-white/10 bg-white/[0.04] px-5 py-4 text-[11px] uppercase tracking-[0.24em] text-slate-500 lg:grid;
+  }
+
+  .table-row {
+    @apply grid gap-4 px-5 py-5;
+  }
+}

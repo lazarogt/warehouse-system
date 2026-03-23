@@ -1,0 +1,66 @@
+services:
+  client:
+    build:
+      context: .
+      dockerfile: ./docker/client/Dockerfile
+    container_name: warehouse-system-client
+    environment:
+      VITE_PORT: ${CLIENT_PORT}
+      VITE_API_URL: ${VITE_API_URL:-/api}
+      VITE_PROXY_TARGET: ${VITE_PROXY_TARGET:-http://server:3000}
+    ports:
+      - "${CLIENT_PORT}:5173"
+    depends_on:
+      server:
+        condition: service_started
+
+  server:
+    build:
+      context: .
+      dockerfile: ./docker/server/Dockerfile
+    container_name: warehouse-system-server
+    environment:
+      NODE_ENV: development
+      SERVER_PORT: ${SERVER_PORT}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      JWT_SECRET: ${JWT_SECRET:-warehouse-system-dev-secret}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS}
+      SESSION_COOKIE_SAME_SITE: ${SESSION_COOKIE_SAME_SITE:-lax}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_COOKIE_DOMAIN: ${SESSION_COOKIE_DOMAIN:-}
+      DEFAULT_ADMIN_NAME: ${DEFAULT_ADMIN_NAME}
+      DEFAULT_ADMIN_USERNAME: ${DEFAULT_ADMIN_USERNAME:-administrador}
+      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD}
+    ports:
+      - "${SERVER_PORT}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:14-alpine
+    container_name: warehouse-system-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
