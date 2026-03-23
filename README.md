@@ -105,4 +105,6 @@ docker compose up -d db
 
 ## 👨‍💻 Autor
 
-Lázaro González
+Lázaro González Torres
+Email: lazarogonzaleztorres091@gmail.com
+Movil: +5355613220
