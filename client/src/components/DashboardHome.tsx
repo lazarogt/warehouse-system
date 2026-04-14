@@ -1,4 +1,3 @@
-import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import {
   type LowStockAlert,
@@ -154,19 +153,16 @@ export default function DashboardHome({ apiBaseUrl }: DashboardHomeProps) {
           </p>
 
           <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {metricCards.map((card, index) => (
-              <motion.article
+            {metricCards.map((card) => (
+              <article
                 key={card.title}
                 className={`rounded-[24px] border border-white/10 bg-gradient-to-br ${card.accent} p-5`}
-                initial={{ opacity: 0, y: 18 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.24, delay: index * 0.05, ease: "easeOut" }}
               >
                 <p className="text-xs uppercase tracking-[0.24em] text-slate-300">{card.title}</p>
                 <p className="mt-4 text-3xl font-semibold text-white">
                   {state.loading ? "--" : card.value}
                 </p>
-              </motion.article>
+              </article>
             ))}
           </div>
         </div>
@@ -216,12 +212,7 @@ export default function DashboardHome({ apiBaseUrl }: DashboardHomeProps) {
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.15fr,0.85fr]">
-        <motion.article
-          className="rounded-[28px] border border-white/10 bg-slate-950/55 p-6 shadow-panel"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.24, ease: "easeOut" }}
-        >
+        <article className="rounded-[28px] border border-white/10 bg-slate-950/55 p-6 shadow-panel">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-[0.25em] text-slate-400">
@@ -231,12 +222,7 @@ export default function DashboardHome({ apiBaseUrl }: DashboardHomeProps) {
             </div>
           </div>
 
-          <motion.div
-            className="mt-6 h-72"
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.3, ease: "easeOut" }}
-          >
+          <div className="mt-6 h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={stockChartData}>
                 <XAxis dataKey="name" stroke="#94a3b8" tickLine={false} axisLine={false} />
@@ -253,24 +239,14 @@ export default function DashboardHome({ apiBaseUrl }: DashboardHomeProps) {
                 <Bar dataKey="stock" radius={[10, 10, 0, 0]} fill="#2dd4bf" />
               </BarChart>
             </ResponsiveContainer>
-          </motion.div>
-        </motion.article>
+          </div>
+        </article>
 
-        <motion.article
-          className="rounded-[28px] border border-white/10 bg-slate-950/55 p-6 shadow-panel"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.24, delay: 0.06, ease: "easeOut" }}
-        >
+        <article className="rounded-[28px] border border-white/10 bg-slate-950/55 p-6 shadow-panel">
           <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Movimientos recientes</p>
           <h3 className="mt-2 text-xl font-semibold text-white">Entradas vs salidas</h3>
 
-          <motion.div
-            className="mt-6 h-72"
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.3, ease: "easeOut" }}
-          >
+          <div className="mt-6 h-72">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -295,7 +271,7 @@ export default function DashboardHome({ apiBaseUrl }: DashboardHomeProps) {
                 />
               </PieChart>
             </ResponsiveContainer>
-          </motion.div>
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             {movementChartData.map((item, index) => (
@@ -311,7 +287,7 @@ export default function DashboardHome({ apiBaseUrl }: DashboardHomeProps) {
               </div>
             ))}
           </div>
-        </motion.article>
+        </article>
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[0.95fr,1.05fr]">
@@ -333,14 +309,10 @@ export default function DashboardHome({ apiBaseUrl }: DashboardHomeProps) {
               </div>
             )}
 
-            {lowStockProducts.map((item, index) => (
-              <motion.article
+            {lowStockProducts.map((item) => (
+              <article
                 key={item.id}
                 className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2, delay: index * 0.03 }}
-                whileHover={{ scale: 1.01, backgroundColor: "rgba(255,255,255,0.03)" }}
               >
                 <div className="flex items-start justify-between gap-4">
                   <div>
@@ -351,7 +323,7 @@ export default function DashboardHome({ apiBaseUrl }: DashboardHomeProps) {
                     {item.currentStock}
                   </span>
                 </div>
-              </motion.article>
+              </article>
             ))}
           </div>
         </article>
@@ -373,14 +345,10 @@ export default function DashboardHome({ apiBaseUrl }: DashboardHomeProps) {
                 <div className="px-4 py-5 text-sm text-slate-300">No hay movimientos registrados.</div>
               )}
 
-              {state.recentMovements.map((movement, index) => (
-                <motion.div
+              {state.recentMovements.map((movement) => (
+                <div
                   key={movement.id}
                   className="grid grid-cols-[1.2fr,0.9fr,0.7fr,1fr] gap-3 px-4 py-4 text-sm text-slate-200"
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.2, delay: index * 0.03 }}
-                  whileHover={{ scale: 1.01, backgroundColor: "rgba(255,255,255,0.03)" }}
                 >
                   <span>{movement.productName}</span>
                   <span>{movement.warehouseName}</span>
@@ -392,7 +360,7 @@ export default function DashboardHome({ apiBaseUrl }: DashboardHomeProps) {
                     {movement.type}
                   </span>
                   <span>{new Date(movement.movementDate).toLocaleDateString()}</span>
-                </motion.div>
+                </div>
               ))}
             </div>
           </div>

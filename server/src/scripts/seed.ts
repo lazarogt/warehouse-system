@@ -1,4 +1,4 @@
-import { pool } from "../config/db";
+import { closeDatabase } from "../lib/db";
 import { runSeed } from "../db/seed";
 
 void runSeed()
@@ -10,5 +10,5 @@ void runSeed()
     process.exitCode = 1;
   })
   .finally(async () => {
-    await pool.end();
+    await closeDatabase();
   });

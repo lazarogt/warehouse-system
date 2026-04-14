@@ -1,15 +1,15 @@
-import { motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   CreateStockTransferInput,
   Product,
   ProductListResponse,
+  ReportFormat,
   StockTransfer,
   Warehouse,
   WarehouseLocation,
 } from "../../../shared/src";
 import { useAuth } from "../auth/AuthProvider";
-import { createApiClient } from "../lib/api";
+import { createApiClient, getErrorMessage, saveDownloadedFile } from "../lib/api";
 import { safeArray } from "../lib/format";
 import ConfirmDialog from "./ConfirmDialog";
 import MotionButton from "./MotionButton";
@@ -38,6 +38,8 @@ type TransferForm = {
   productId: string;
   quantity: string;
   notes: string;
+  manualDestination: string;
+  carrierName: string;
 };
 
 const initialState: TransfersState = {
@@ -58,6 +60,8 @@ const initialForm: TransferForm = {
   productId: "",
   quantity: "1",
   notes: "",
+  manualDestination: "",
+  carrierName: "",
 };
 
 export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) {
@@ -70,6 +74,7 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
     transfer: StockTransfer;
     action: "approve" | "complete" | "cancel";
   } | null>(null);
+  const [exportingFormat, setExportingFormat] = useState<ReportFormat | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -107,6 +112,8 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
     currentUser?.role === "manager" ||
     currentUser?.role === "operator";
   const canApprove =
+    currentUser?.role === "admin" || currentUser?.role === "manager";
+  const canExportReports =
     currentUser?.role === "admin" || currentUser?.role === "manager";
 
   const fromLocations = useMemo(() => {
@@ -154,6 +161,10 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
       toLocationId: formValues.toLocationId ? Number(formValues.toLocationId) : null,
       productId: Number(formValues.productId),
       quantity: Number(formValues.quantity),
+      manualDestination: formValues.manualDestination.trim()
+        ? formValues.manualDestination.trim()
+        : null,
+      carrierName: formValues.carrierName.trim() ? formValues.carrierName.trim() : null,
       notes: formValues.notes.trim() ? formValues.notes.trim() : null,
     };
 
@@ -179,6 +190,41 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
     }
 
     setState((current) => ({ ...current, saving: false }));
+  };
+
+  const handleExport = async (format: ReportFormat) => {
+    if (exportingFormat) {
+      return;
+    }
+
+    if (state.transfers.length === 0) {
+      notify({
+        type: "error",
+        title: "No hay datos para exportar",
+        message: "Todavia no hay transferencias registradas.",
+      });
+      return;
+    }
+
+    setExportingFormat(format);
+
+    try {
+      const file = await api.download(`/reports/transfers/export?format=${format}`);
+      saveDownloadedFile(file);
+      notify({
+        type: "success",
+        title: "Exportacion generada",
+        message: `Se descargo el reporte de transferencias en ${format.toUpperCase()}.`,
+      });
+    } catch (error) {
+      notify({
+        type: "error",
+        title: "No se pudo exportar transferencias",
+        message: getErrorMessage(error, "Intentalo de nuevo."),
+      });
+    } finally {
+      setExportingFormat(null);
+    }
   };
 
   const handleTransferAction = async () => {
@@ -240,6 +286,32 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
           <p className="mt-2 text-sm text-slate-400">
             Traslada producto entre almacenes o ubicaciones internas sin perder consistencia.
           </p>
+
+          {canExportReports && (
+            <div className="mt-6 flex flex-wrap gap-3">
+              <MotionButton
+                aria-label="Exportar transferencias en Excel"
+                onClick={() => void handleExport("excel")}
+                className="rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 text-sm font-medium text-cyan-100 hover:bg-cyan-500/20"
+              >
+                Exportar Excel
+              </MotionButton>
+              <MotionButton
+                aria-label="Exportar transferencias en PDF"
+                onClick={() => void handleExport("pdf")}
+                className="rounded-2xl border border-orange-400/20 bg-orange-500/10 px-4 py-3 text-sm font-medium text-orange-100 hover:bg-orange-500/20"
+              >
+                Exportar PDF
+              </MotionButton>
+              <MotionButton
+                aria-label="Exportar transferencias en ODF"
+                onClick={() => void handleExport("odf")}
+                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-slate-100 hover:bg-white/10"
+              >
+                Exportar ODF
+              </MotionButton>
+            </div>
+          )}
 
           {!canCreate && (
             <div className="mt-6 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4 text-sm text-amber-50">
@@ -382,6 +454,40 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
               </label>
             </div>
 
+            <div className="grid gap-5 md:grid-cols-2">
+              <label className="space-y-2">
+                <span className="text-sm font-medium text-slate-200">Destino manual</span>
+                <input
+                  value={formValues.manualDestination}
+                  disabled={!canCreate}
+                  onChange={(event) =>
+                    setFormValues((current) => ({
+                      ...current,
+                      manualDestination: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-cyan-300 disabled:opacity-60"
+                  placeholder="Ej. Cafeteria Centro"
+                />
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-sm font-medium text-slate-200">Transportista</span>
+                <input
+                  value={formValues.carrierName}
+                  disabled={!canCreate}
+                  onChange={(event) =>
+                    setFormValues((current) => ({
+                      ...current,
+                      carrierName: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-cyan-300 disabled:opacity-60"
+                  placeholder="Nombre del responsable del traslado"
+                />
+              </label>
+            </div>
+
             <label className="space-y-2">
               <span className="text-sm font-medium text-slate-200">Notas</span>
               <textarea
@@ -417,13 +523,10 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
               </div>
             )}
 
-            {state.transfers.map((transfer, index) => (
-              <motion.article
+            {state.transfers.map((transfer) => (
+              <article
                 key={transfer.id}
                 className="rounded-2xl border border-white/10 bg-white/5 p-4"
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.22, delay: index * 0.03 }}
               >
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
@@ -434,12 +537,18 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
                       {transfer.fromWarehouseName}
                       {transfer.fromLocationName ? ` / ${transfer.fromLocationName}` : ""}
                       {" -> "}
-                      {transfer.toWarehouseName}
-                      {transfer.toLocationName ? ` / ${transfer.toLocationName}` : ""}
+                      {transfer.manualDestination?.trim()
+                        ? transfer.manualDestination
+                        : `${transfer.toWarehouseName}${transfer.toLocationName ? ` / ${transfer.toLocationName}` : ""}`}
                     </p>
                     <p className="mt-1 text-sm text-slate-400">
                       Cantidad: {transfer.quantity} · Solicitado por: {transfer.requestedByName}
                     </p>
+                    {transfer.carrierName && (
+                      <p className="mt-1 text-sm text-slate-400">
+                        Transportista: {transfer.carrierName}
+                      </p>
+                    )}
                     {transfer.notes && (
                       <p className="mt-2 text-sm text-slate-300">{transfer.notes}</p>
                     )}
@@ -491,7 +600,7 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
                     )}
                   </div>
                 </div>
-              </motion.article>
+              </article>
             ))}
           </div>
         </section>

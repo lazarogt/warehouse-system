@@ -21,6 +21,8 @@ export interface StockTransfer {
   approvedByName: string | null;
   completedBy: number | null;
   completedByName: string | null;
+  manualDestination: string | null;
+  carrierName: string | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -33,6 +35,8 @@ export interface CreateStockTransferInput {
   toLocationId?: number | null;
   productId: number;
   quantity: number;
+  manualDestination?: string | null;
+  carrierName?: string | null;
   notes?: string | null;
 }
 

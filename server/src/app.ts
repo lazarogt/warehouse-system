@@ -12,6 +12,7 @@ import {
 import categoryRouter from "./modules/categories/category.router";
 import alertsRouter from "./modules/alerts/alerts.router";
 import adjustmentRouter from "./modules/adjustments/adjustment.router";
+import dispatchRouter from "./modules/dispatches/dispatch.router";
 import inventoryRouter from "./modules/inventory/inventory.router";
 import locationRouter from "./modules/locations/location.router";
 import productRouter from "./modules/products/product.router";
@@ -54,6 +55,7 @@ export const createApp = () => {
   app.use(`${API_PREFIX}/inventory`, requireAuthentication, requirePasswordChangeComplete, inventoryRouter);
   app.use(`${API_PREFIX}/locations`, requireAuthentication, requirePasswordChangeComplete, locationRouter);
   app.use(`${API_PREFIX}/transfers`, requireAuthentication, requirePasswordChangeComplete, transferRouter);
+  app.use(`${API_PREFIX}/dispatches`, requireAuthentication, requirePasswordChangeComplete, dispatchRouter);
   app.use(`${API_PREFIX}/adjustments`, requireAuthentication, requirePasswordChangeComplete, adjustmentRouter);
   app.use(`${API_PREFIX}/cycle-counts`, requireAuthentication, requirePasswordChangeComplete, cycleCountRouter);
   app.use(`${API_PREFIX}/alerts`, requireAuthentication, requirePasswordChangeComplete, alertsRouter);

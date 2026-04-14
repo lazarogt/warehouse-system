@@ -8,6 +8,7 @@ export * from "./types/alerts";
 export * from "./types/category";
 export * from "./types/category-attribute";
 export * from "./types/cycle-count";
+export * from "./types/dispatch";
 export * from "./types/health";
 export * from "./types/product-attribute";
 export * from "./types/product";

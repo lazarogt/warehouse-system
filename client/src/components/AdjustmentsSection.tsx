@@ -1,4 +1,3 @@
-import { motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   STOCK_ADJUSTMENT_TYPES,
@@ -335,13 +334,10 @@ export default function AdjustmentsSection({ apiBaseUrl }: AdjustmentsSectionPro
               </div>
             )}
 
-            {state.adjustments.map((adjustment, index) => (
-              <motion.article
+            {state.adjustments.map((adjustment) => (
+              <article
                 key={adjustment.id}
                 className="rounded-2xl border border-white/10 bg-white/5 p-4"
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.22, delay: index * 0.03 }}
               >
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
@@ -363,7 +359,7 @@ export default function AdjustmentsSection({ apiBaseUrl }: AdjustmentsSectionPro
                     {new Date(adjustment.createdAt).toLocaleString()}
                   </span>
                 </div>
-              </motion.article>
+              </article>
             ))}
           </div>
         </section>

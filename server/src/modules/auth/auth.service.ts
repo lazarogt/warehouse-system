@@ -1,7 +1,7 @@
 import type { ChangePasswordInput, LoginInput, User } from "../../../../shared/src";
 import { AppError } from "../../common/errors";
 import { activeFilter } from "../../common/soft-delete";
-import { query } from "../../config/db";
+import { query } from "../../lib/db";
 import { env } from "../../config/env";
 import { getUserById, getUserByIdentifierWithPassword, registerUser } from "../users/user.service";
 import { recordCriticalEvent } from "../logging/logging.service";

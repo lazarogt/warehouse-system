@@ -6,13 +6,14 @@ import type {
   UpdateCycleCountItemInput,
 } from "../../../../shared/src";
 import { AppError } from "../../common/errors";
-import { query, withTransaction } from "../../config/db";
+import { query, transaction } from "../../lib/db";
 import {
   applyStockDelta,
   assertLocationBelongsToWarehouse,
   assertProductExists,
   assertWarehouseExists,
   getStockLevelByProductWarehouseAndLocation,
+  insertStockMovementForDelta,
 } from "../inventory/stock.service";
 
 type CycleCountRow = Omit<CycleCount, "items">;
@@ -254,8 +255,8 @@ export const completeCycleCount = async (
   options: { applyAdjustments: boolean },
   actorUserId: number,
 ) => {
-  await withTransaction(async (client) => {
-    const cycleCountResult = await client.query<{
+  transaction((client) => {
+    const cycleCountResult = client.query<{
       id: number;
       warehouseId: number;
       warehouseLocationId: number | null;
@@ -285,7 +286,7 @@ export const completeCycleCount = async (
     }
 
     const items = (
-      await client.query<CycleCountItemRow>(
+      client.query<CycleCountItemRow>(
         `
           ${cycleCountItemSelect}
           WHERE cci.cycle_count_id = $1
@@ -301,14 +302,14 @@ export const completeCycleCount = async (
       }
 
       if (options.applyAdjustments && item.difference) {
-        await applyStockDelta(client, {
+        applyStockDelta(client, {
           warehouseId: cycleCount.warehouseId,
           warehouseLocationId: cycleCount.warehouseLocationId,
           productId: item.productId,
           delta: item.difference,
         });
 
-        await client.query(
+        const adjustmentResult = client.query<{ id: number }>(
           `
             INSERT INTO stock_adjustments (
               warehouse_id,
@@ -320,7 +321,8 @@ export const completeCycleCount = async (
               reason,
               created_by
             )
-            VALUES ($1, $2, $3, 'correction', $4, $5, $6, $7);
+            VALUES ($1, $2, $3, 'correction', $4, $5, $6, $7)
+            RETURNING id;
           `,
           [
             cycleCount.warehouseId,
@@ -332,10 +334,19 @@ export const completeCycleCount = async (
             actorUserId,
           ],
         );
+
+        insertStockMovementForDelta(client, {
+          warehouseId: cycleCount.warehouseId,
+          warehouseLocationId: cycleCount.warehouseLocationId,
+          productId: item.productId,
+          delta: item.difference,
+          userId: actorUserId,
+          observation: `Conteo ciclico #${id} conciliado · Ajuste #${adjustmentResult.rows[0].id}`,
+        });
       }
     }
 
-    await client.query(
+    client.query(
       `
         UPDATE cycle_counts
         SET
@@ -346,7 +357,7 @@ export const completeCycleCount = async (
       `,
       [id],
     );
-  });
+  }).immediate();
 
   return getCycleCountById(id);
 };

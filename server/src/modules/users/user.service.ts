@@ -11,13 +11,14 @@ import type {
 } from "../../../../shared/src";
 import { AppError } from "../../common/errors";
 import { activeFilter } from "../../common/soft-delete";
-import { query, withTransaction } from "../../config/db";
+import { query, withTransaction } from "../../lib/db";
 import { env } from "../../config/env";
 import { hashPassword } from "../auth/auth.security";
 import { recordCriticalEvent } from "../logging/logging.service";
 
 type UserRow = User & {
   passwordHash?: string;
+  mustChangePassword: boolean | number;
 };
 
 const userSelect = `
@@ -36,6 +37,10 @@ const userSelect = `
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 const normalizeUsername = (username: string) => username.trim().toLowerCase();
+const mapUserRow = <T extends UserRow>(row: T): T => ({
+  ...row,
+  mustChangePassword: row.mustChangePassword === true || Number(row.mustChangePassword) === 1,
+});
 
 const buildUsernameCandidate = (input: { username?: string; email: string; name: string }) => {
   const source =
@@ -97,7 +102,7 @@ export const listUsers = async () => {
     ORDER BY id;
   `);
 
-  return result.rows;
+  return result.rows.map(mapUserRow);
 };
 
 export const getUserById = async (id: number) => {
@@ -111,7 +116,7 @@ export const getUserById = async (id: number) => {
     [id],
   );
 
-  return result.rows[0] ?? null;
+  return result.rows[0] ? mapUserRow(result.rows[0]) : null;
 };
 
 export const getUserByIdentifierWithPassword = async (identifier: string) => {
@@ -128,7 +133,7 @@ export const getUserByIdentifierWithPassword = async (identifier: string) => {
     [normalizedIdentifier],
   );
 
-  return result.rows[0] ?? null;
+  return result.rows[0] ? mapUserRow(result.rows[0]) : null;
 };
 
 export const getUserByEmailWithPassword = async (email: string) => {
@@ -172,7 +177,7 @@ const insertUser = async (input: {
       [input.name, username, normalizeEmail(input.email), passwordHash, input.role, input.status],
     );
 
-    return result.rows[0];
+    return mapUserRow(result.rows[0]);
   } catch (error) {
     mapConflictError(error);
     throw error;
@@ -258,7 +263,7 @@ export const updateUser = async (id: number, input: UpdateUserInput, actorUserId
       },
     });
 
-    return result.rows[0];
+    return mapUserRow(result.rows[0]);
   } catch (error) {
     mapConflictError(error);
     throw error;
@@ -308,7 +313,7 @@ export const updateUserRole = async (
     },
   });
 
-  return result.rows[0];
+  return mapUserRow(result.rows[0]);
 };
 
 export const deleteUser = async (id: number, actorUserId?: number | null) => {

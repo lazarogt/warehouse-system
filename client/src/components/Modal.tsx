@@ -1,4 +1,3 @@
-import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, type ReactNode } from "react";
 
 type ModalProps = {
@@ -30,31 +29,24 @@ export default function Modal({ open, onClose, titleId, children }: ModalProps) 
     };
   }, [onClose, open]);
 
+  if (!open) {
+    return null;
+  }
+
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          aria-modal="true"
-          role="dialog"
-          aria-labelledby={titleId}
-          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/70 px-4 py-6 backdrop-blur-sm"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={onClose}
-        >
-          <motion.div
-            className="max-h-[90vh] w-full max-w-3xl overflow-y-auto"
-            initial={{ opacity: 0, scale: 0.94, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 12 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {children}
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <div
+      aria-modal="true"
+      role="dialog"
+      aria-labelledby={titleId}
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/70 px-4 py-6 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[90vh] w-full max-w-3xl overflow-y-auto"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>
   );
 }

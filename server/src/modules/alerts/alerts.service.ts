@@ -1,6 +1,6 @@
 import type { LowStockAlert } from "../../../../shared/src";
 import { activeFilter } from "../../common/soft-delete";
-import { query } from "../../config/db";
+import { query } from "../../lib/db";
 
 type LowStockAlertRow = LowStockAlert;
 
@@ -16,7 +16,11 @@ export const listLowStockAlerts = async () => {
         p.price::float8 AS "price",
         p.minimum_stock AS "minimumStock",
         COALESCE(SUM(ws.quantity), 0)::int AS "currentStock",
-        GREATEST(p.minimum_stock - COALESCE(SUM(ws.quantity), 0)::int, 0) AS shortage,
+        CASE
+          WHEN p.minimum_stock - COALESCE(SUM(ws.quantity), 0)::int > 0
+            THEN p.minimum_stock - COALESCE(SUM(ws.quantity), 0)::int
+          ELSE 0
+        END AS shortage,
         p.created_at AS "createdAt",
         p.updated_at AS "updatedAt"
       FROM products p

@@ -1,18 +1,22 @@
-import type { PoolClient } from "pg";
+import type { DatabaseClient } from "../../lib/db";
 import type { CategoryAttribute, CategoryAttributeInput, CategoryAttributeType } from "../../../../shared/src";
 import { AppError } from "../../common/errors";
-import { query, withTransaction } from "../../config/db";
+import { query, withTransaction } from "../../lib/db";
 import {
   normalizeDynamicAttributeValue,
   parseStoredAttributeValueForValidation,
 } from "../products/product-attribute.utils";
 
 type EntityIdRow = { id: number };
-type CategoryAttributeRow = CategoryAttribute;
+type CategoryAttributeRow = Omit<CategoryAttribute, "required" | "active" | "options"> & {
+  required: number | boolean;
+  active: number | boolean;
+  options: string | null;
+};
 type AttributeValueRow = { value: string };
 type CountRow = { total: number };
 
-const assertCategoryExists = async (categoryId: number, client?: PoolClient) => {
+const assertCategoryExists = async (categoryId: number, client?: DatabaseClient) => {
   const result = client
     ? await client.query<EntityIdRow>("SELECT id FROM categories WHERE id = $1;", [categoryId])
     : await query<EntityIdRow>("SELECT id FROM categories WHERE id = $1;", [categoryId]);
@@ -48,44 +52,44 @@ const categoryAttributeQuery = `
     ca.label,
     ca.type,
     ca.required,
-    CASE
-      WHEN jsonb_typeof(ca.options) = 'array' THEN ARRAY(
-        SELECT jsonb_array_elements_text(ca.options)
-      )
-      ELSE NULL
-    END AS options,
+    ca.options,
     ca.sort_order AS "sortOrder",
     ca.active,
-    COALESCE(usage_stats.usage_count, 0)::int AS "usageCount",
+    COALESCE(usage_stats.usage_count, 0) AS "usageCount",
     ca.created_at AS "createdAt",
     ca.updated_at AS "updatedAt"
   FROM category_attributes ca
   LEFT JOIN (
-    SELECT category_attribute_id, COUNT(*)::int AS usage_count
+    SELECT category_attribute_id, COUNT(*) AS usage_count
     FROM product_attributes
     GROUP BY category_attribute_id
   ) usage_stats ON usage_stats.category_attribute_id = ca.id
 `;
 
-const mapCategoryAttributeRow = `
-  id,
-  "categoryId",
-  key,
-  label,
-  type,
-  required,
-  options,
-  "sortOrder",
-  active,
-  "usageCount",
-  "createdAt",
-  "updatedAt"
-`;
+const parseOptions = (value: string | null) => {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : null;
+  } catch {
+    return null;
+  }
+};
+
+const mapCategoryAttributeRow = (row: CategoryAttributeRow): CategoryAttribute => ({
+  ...row,
+  required: row.required === true || row.required === 1,
+  active: row.active === true || row.active === 1,
+  options: parseOptions(row.options),
+});
 
 const ensureAttributeBelongsToCategory = async (
   categoryId: number,
   attributeId: number,
-  client?: PoolClient,
+  client?: DatabaseClient,
 ) => {
   const result = client
     ? await client.query<EntityIdRow>(
@@ -105,7 +109,7 @@ const ensureAttributeBelongsToCategory = async (
 const getCategoryAttributeById = async (
   categoryId: number,
   attributeId: number,
-  client?: PoolClient,
+  client?: DatabaseClient,
 ) => {
   const sql = `
     ${categoryAttributeQuery}
@@ -117,14 +121,14 @@ const getCategoryAttributeById = async (
     ? await client.query<CategoryAttributeRow>(sql, [categoryId, attributeId])
     : await query<CategoryAttributeRow>(sql, [categoryId, attributeId]);
 
-  return result.rows[0] ?? null;
+  return result.rows[0] ? mapCategoryAttributeRow(result.rows[0]) : null;
 };
 
 const assertAttributeValuesRemainCompatible = async (
   categoryId: number,
   attributeId: number,
   input: CategoryAttributeInput,
-  client: PoolClient,
+  client: DatabaseClient,
 ) => {
   const nextDefinition: CategoryAttribute = {
     id: attributeId,
@@ -144,7 +148,7 @@ const assertAttributeValuesRemainCompatible = async (
   if (input.required) {
     const missingRequiredResult = await client.query<CountRow>(
       `
-        SELECT COUNT(*)::int AS total
+        SELECT COUNT(*) AS total
         FROM products p
         LEFT JOIN product_attributes pa
           ON pa.product_id = p.id
@@ -192,12 +196,12 @@ export const listCategoryAttributes = async (categoryId: number) => {
     [categoryId],
   );
 
-  return result.rows;
+  return result.rows.map(mapCategoryAttributeRow);
 };
 
 export const listActiveCategoryAttributes = async (
   categoryId: number,
-  client?: PoolClient,
+  client?: DatabaseClient,
 ) => {
   const result = client
     ? await client.query<CategoryAttributeRow>(
@@ -219,14 +223,14 @@ export const listActiveCategoryAttributes = async (
         [categoryId],
       );
 
-  return result.rows;
+  return result.rows.map(mapCategoryAttributeRow);
 };
 
 const ensureUniqueCategoryAttributeKey = async (
   categoryId: number,
   key: string,
   excludeId?: number,
-  client?: PoolClient,
+  client?: DatabaseClient,
 ) => {
   const result = client
     ? await client.query<EntityIdRow>(
@@ -235,7 +239,7 @@ const ensureUniqueCategoryAttributeKey = async (
           FROM category_attributes
           WHERE category_id = $1
             AND key = $2
-            AND ($3::bigint IS NULL OR id <> $3);
+            AND ($3 IS NULL OR id <> $3);
         `,
         [categoryId, key, excludeId ?? null],
       )
@@ -245,7 +249,7 @@ const ensureUniqueCategoryAttributeKey = async (
           FROM category_attributes
           WHERE category_id = $1
             AND key = $2
-            AND ($3::bigint IS NULL OR id <> $3);
+            AND ($3 IS NULL OR id <> $3);
         `,
         [categoryId, key, excludeId ?? null],
       );
@@ -290,7 +294,7 @@ export const createCategoryAttribute = async (categoryId: number, input: Categor
           sort_order,
           active
         )
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id;
       `,
       [
@@ -342,7 +346,7 @@ export const updateCategoryAttribute = async (
           label = $4,
           type = $5,
           required = $6,
-          options = $7::jsonb,
+          options = $7,
           sort_order = $8,
           active = $9,
           updated_at = NOW()

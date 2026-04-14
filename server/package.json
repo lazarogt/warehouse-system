@@ -11,20 +11,20 @@
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
+    "better-sqlite3": "^12.9.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "pdfkit": "^0.18.0",
-    "pg": "^8.13.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.1",
     "@types/pdfkit": "^0.17.5",
-    "@types/pg": "^8.11.10",
     "@types/supertest": "^6.0.3",
     "supertest": "^7.0.0",
     "tsx": "^4.19.2",

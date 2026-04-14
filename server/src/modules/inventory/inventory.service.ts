@@ -1,6 +1,6 @@
 import type { StockMovementInput, StockMovementResult } from "../../../../shared/src";
 import { AppError } from "../../common/errors";
-import { withTransaction } from "../../config/db";
+import { transaction } from "../../lib/db";
 import {
   applyStockDelta,
   assertLocationBelongsToWarehouse,
@@ -17,29 +17,29 @@ export const registerStockMovement = async (
   input: StockMovementInput,
   userId: number,
 ): Promise<StockMovementResult> => {
-  return withTransaction(async (client) => {
-    await assertProductExists(input.productId, client);
-    await assertWarehouseExists(input.warehouseId, client);
+  return transaction((client) => {
+    assertProductExists(input.productId, client);
+    assertWarehouseExists(input.warehouseId, client);
 
     if (input.warehouseLocationId) {
-      await assertLocationBelongsToWarehouse(input.warehouseLocationId, input.warehouseId, client);
+      assertLocationBelongsToWarehouse(input.warehouseLocationId, input.warehouseId, client);
     }
 
-    await applyStockDelta(client, {
+    applyStockDelta(client, {
       warehouseId: input.warehouseId,
       warehouseLocationId: input.warehouseLocationId ?? null,
       productId: input.productId,
       delta: input.type === "entry" ? input.quantity : -input.quantity,
     });
 
-    const movementId = await insertStockMovement(client, input, userId);
+    const movementId = insertStockMovement(client, input, userId);
 
     if (!movementId) {
       throw new AppError(500, "Unable to save stock movement.");
     }
 
-    const movement = await getDetailedStockMovementById(movementId, client);
-    const currentStock = await getStockLevelByProductWarehouseAndLocation(
+    const movement = getDetailedStockMovementById(movementId, client);
+    const currentStock = getStockLevelByProductWarehouseAndLocation(
       input.productId,
       input.warehouseId,
       input.warehouseLocationId ?? null,
@@ -54,7 +54,7 @@ export const registerStockMovement = async (
       movement,
       currentStock,
     };
-  });
+  }).immediate();
 };
 
 export const getCurrentStock = async (filters: {

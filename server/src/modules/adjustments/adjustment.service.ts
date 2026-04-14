@@ -1,7 +1,7 @@
-import type { PoolClient } from "pg";
+import type { DatabaseClient } from "../../lib/db";
 import type { StockAdjustment, StockAdjustmentInput } from "../../../../shared/src";
 import { AppError } from "../../common/errors";
-import { query, withTransaction } from "../../config/db";
+import { query, transaction } from "../../lib/db";
 import {
   applyStockDelta,
   assertLocationBelongsToWarehouse,
@@ -9,6 +9,7 @@ import {
   assertWarehouseExists,
   getCurrentLocationQuantityForUpdate,
   getCurrentWarehouseQuantityForUpdate,
+  insertStockMovementForDelta,
 } from "../inventory/stock.service";
 
 type AdjustmentRow = StockAdjustment;
@@ -48,30 +49,30 @@ export const listAdjustments = async () => {
   ).rows;
 };
 
-export const getAdjustmentById = async (id: number, client?: PoolClient) => {
+export const getAdjustmentById = (id: number, client?: DatabaseClient) => {
   const sql = `
     ${adjustmentSelect}
     WHERE sa.id = $1;
   `;
   const result = client
-    ? await client.query<AdjustmentRow>(sql, [id])
-    : await query<AdjustmentRow>(sql, [id]);
+    ? client.query<AdjustmentRow>(sql, [id])
+    : query<AdjustmentRow>(sql, [id]);
 
   return result.rows[0] ?? null;
 };
 
 export const createAdjustment = async (input: StockAdjustmentInput, createdBy: number) => {
-  return withTransaction(async (client) => {
-    await assertWarehouseExists(input.warehouseId, client);
-    await assertProductExists(input.productId, client);
+  return transaction((client) => {
+    assertWarehouseExists(input.warehouseId, client);
+    assertProductExists(input.productId, client);
 
     if (input.warehouseLocationId) {
-      await assertLocationBelongsToWarehouse(input.warehouseLocationId, input.warehouseId, client);
+      assertLocationBelongsToWarehouse(input.warehouseLocationId, input.warehouseId, client);
     }
 
     const previousQuantity = input.warehouseLocationId
-      ? await getCurrentLocationQuantityForUpdate(client, input.warehouseLocationId, input.productId)
-      : await getCurrentWarehouseQuantityForUpdate(client, input.warehouseId, input.productId);
+      ? getCurrentLocationQuantityForUpdate(client, input.warehouseLocationId, input.productId)
+      : getCurrentWarehouseQuantityForUpdate(client, input.warehouseId, input.productId);
 
     let delta = 0;
 
@@ -93,14 +94,14 @@ export const createAdjustment = async (input: StockAdjustmentInput, createdBy: n
       delta = input.adjustedQuantity - previousQuantity;
     }
 
-    await applyStockDelta(client, {
+    applyStockDelta(client, {
       warehouseId: input.warehouseId,
       warehouseLocationId: input.warehouseLocationId ?? null,
       productId: input.productId,
       delta,
     });
 
-    const result = await client.query<{ id: number }>(
+    const result = client.query<{ id: number }>(
       `
         INSERT INTO stock_adjustments (
           warehouse_id,
@@ -127,12 +128,21 @@ export const createAdjustment = async (input: StockAdjustmentInput, createdBy: n
       ],
     );
 
-    const adjustment = await getAdjustmentById(result.rows[0].id, client);
+    insertStockMovementForDelta(client, {
+      warehouseId: input.warehouseId,
+      warehouseLocationId: input.warehouseLocationId ?? null,
+      productId: input.productId,
+      delta,
+      userId: createdBy,
+      observation: `Ajuste #${result.rows[0].id} (${input.type}) · ${input.reason.trim()}`,
+    });
+
+    const adjustment = getAdjustmentById(result.rows[0].id, client);
 
     if (!adjustment) {
       throw new AppError(500, "Unable to load created adjustment.");
     }
 
     return adjustment;
-  });
+  }).immediate();
 };

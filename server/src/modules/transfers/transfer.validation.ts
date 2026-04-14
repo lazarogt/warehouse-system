@@ -39,6 +39,14 @@ export const parseCreateTransferInput = (payload: unknown): CreateStockTransferI
     toLocationId: readOptionalPositiveId(body.toLocationId, "toLocationId"),
     productId: readPositiveInteger(body.productId, "productId"),
     quantity: readPositiveInteger(body.quantity, "quantity"),
+    manualDestination: readString(body.manualDestination, "manualDestination", {
+      optional: true,
+      maxLength: 180,
+    }),
+    carrierName: readString(body.carrierName, "carrierName", {
+      optional: true,
+      maxLength: 180,
+    }),
     notes: readString(body.notes, "notes", {
       optional: true,
       maxLength: 1000,

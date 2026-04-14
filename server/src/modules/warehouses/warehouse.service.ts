@@ -1,7 +1,7 @@
 import type { Warehouse, WarehouseInput } from "../../../../shared/src";
 import { AppError } from "../../common/errors";
 import { activeFilter } from "../../common/soft-delete";
-import { query, withTransaction } from "../../config/db";
+import { query, withTransaction } from "../../lib/db";
 
 type WarehouseRow = Warehouse;
 

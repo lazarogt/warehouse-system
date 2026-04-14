@@ -1,13 +1,28 @@
 import assert from "node:assert/strict";
-import { after, before, beforeEach, test } from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { after, beforeEach, test } from "node:test";
 import request from "supertest";
+import * as XLSX from "xlsx";
 import { createApp } from "./app";
-import { pool } from "./config/db";
+import { closeDatabase, query } from "./lib/db";
 import { env } from "./config/env";
 import { runSeed } from "./db/seed";
 import { resetDatabase, runMigrations } from "./db/schema";
 
 const app = createApp();
+let currentTestDatabasePath: string | null = null;
+
+const removeDatabaseArtifacts = (databasePath: string | null) => {
+  if (!databasePath) {
+    return;
+  }
+
+  for (const candidate of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
+    fs.rmSync(candidate, { force: true });
+  }
+};
 
 const createAuthenticatedAgent = async (identifier: string, password: string) => {
   const agent = request.agent(app);
@@ -35,17 +50,110 @@ const createAdminAgent = async () => {
   return agent;
 };
 
-before(async () => {
-  await runMigrations();
-});
+const getWarehouseStockQuantity = async (warehouseId: number, productId: number) => {
+  const result = await query<{ quantity: number }>(
+    `
+      SELECT quantity
+      FROM warehouse_stock
+      WHERE warehouse_id = $1
+        AND product_id = $2;
+    `,
+    [warehouseId, productId],
+  );
+
+  return result.rows[0]?.quantity ?? 0;
+};
+
+const getLocationStockQuantity = async (warehouseLocationId: number, productId: number) => {
+  const result = await query<{ quantity: number }>(
+    `
+      SELECT quantity
+      FROM warehouse_location_stock
+      WHERE warehouse_location_id = $1
+        AND product_id = $2;
+    `,
+    [warehouseLocationId, productId],
+  );
+
+  return result.rows[0]?.quantity ?? 0;
+};
+
+const getWarehouseMovementLedgerQuantity = async (warehouseId: number, productId: number) => {
+  const result = await query<{ quantity: number }>(
+    `
+      SELECT COALESCE(
+        SUM(CASE WHEN type = 'entry' THEN quantity ELSE -quantity END),
+        0
+      ) AS quantity
+      FROM stock_movements
+      WHERE warehouse_id = $1
+        AND product_id = $2;
+    `,
+    [warehouseId, productId],
+  );
+
+  return result.rows[0]?.quantity ?? 0;
+};
+
+const getLocationMovementLedgerQuantity = async (warehouseLocationId: number, productId: number) => {
+  const result = await query<{ quantity: number }>(
+    `
+      SELECT COALESCE(
+        SUM(CASE WHEN type = 'entry' THEN quantity ELSE -quantity END),
+        0
+      ) AS quantity
+      FROM stock_movements
+      WHERE warehouse_location_id = $1
+        AND product_id = $2;
+    `,
+    [warehouseLocationId, productId],
+  );
+
+  return result.rows[0]?.quantity ?? 0;
+};
+
+const assertMovementLedgerMatchesStock = async (input: {
+  warehouseId: number;
+  productId: number;
+  warehouseLocationId?: number;
+}) => {
+  const warehouseStockQuantity = await getWarehouseStockQuantity(input.warehouseId, input.productId);
+  const warehouseMovementQuantity = await getWarehouseMovementLedgerQuantity(
+    input.warehouseId,
+    input.productId,
+  );
+  assert.equal(warehouseMovementQuantity, warehouseStockQuantity);
+
+  if (input.warehouseLocationId) {
+    const locationStockQuantity = await getLocationStockQuantity(
+      input.warehouseLocationId,
+      input.productId,
+    );
+    const locationMovementQuantity = await getLocationMovementLedgerQuantity(
+      input.warehouseLocationId,
+      input.productId,
+    );
+    assert.equal(locationMovementQuantity, locationStockQuantity);
+  }
+};
 
 beforeEach(async () => {
+  await closeDatabase();
+  removeDatabaseArtifacts(currentTestDatabasePath);
+
+  currentTestDatabasePath = path.join(
+    os.tmpdir(),
+    `warehouse-system-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+  );
+  process.env.SQLITE_DB_PATH = currentTestDatabasePath;
+
+  await runMigrations();
   await resetDatabase();
 });
 
 after(async () => {
-  await resetDatabase();
-  await pool.end();
+  await closeDatabase();
+  removeDatabaseArtifacts(currentTestDatabasePath);
 });
 
 test("auth protege endpoints y admin mantiene el CRUD de fase 2", async () => {
@@ -654,6 +762,21 @@ test("reportes y alertas respetan permisos y exponen stock bajo", async () => {
     managerProductsExcelResponse.headers["content-disposition"],
     /products-report-.*\.xlsx/,
   );
+  assert.ok(Number(managerProductsExcelResponse.headers["content-length"] ?? 0) > 0);
+
+  const managerProductsOdfResponse = await managerAgent.get(
+    "/api/reports/products/export?format=odf",
+  );
+  assert.equal(managerProductsOdfResponse.status, 200);
+  assert.match(
+    managerProductsOdfResponse.headers["content-type"],
+    /application\/vnd\.oasis\.opendocument\.spreadsheet/,
+  );
+  assert.match(
+    managerProductsOdfResponse.headers["content-disposition"],
+    /products-report-.*\.ods/,
+  );
+  assert.ok(Number(managerProductsOdfResponse.headers["content-length"] ?? 0) > 0);
 
   const managerMovementsPdfResponse = await managerAgent.get("/api/reports/movements/export?format=pdf");
   assert.equal(managerMovementsPdfResponse.status, 200);
@@ -662,6 +785,7 @@ test("reportes y alertas respetan permisos y exponen stock bajo", async () => {
     managerMovementsPdfResponse.headers["content-disposition"],
     /movements-report-.*\.pdf/,
   );
+  assert.ok(Number(managerMovementsPdfResponse.headers["content-length"] ?? 0) > 0);
 
   const operatorProductsExportResponse = await operatorAgent.get(
     "/api/reports/products/export?format=excel",
@@ -1121,7 +1245,7 @@ test("en produccion el reset de password no devuelve la contraseña temporal", a
 });
 
 test("logging no rompe el flujo principal si el registro falla", async () => {
-  await pool.query("DROP TABLE critical_event_logs;");
+  await query("DROP TABLE critical_event_logs;");
 
   const adminAgent = await createAdminAgent();
 
@@ -1242,6 +1366,16 @@ test("ubicaciones, lookup por sku barcode y ajustes respetan permisos por rol", 
   assert.equal(createAdjustmentResponse.body.previousQuantity, 20);
   assert.equal(createAdjustmentResponse.body.adjustedQuantity, 12);
 
+  const adjustmentMovementsResponse = await managerAgent.get("/api/inventory/movements?limit=10");
+  assert.equal(adjustmentMovementsResponse.status, 200);
+  const adjustmentMovement = adjustmentMovementsResponse.body.find(
+    (movement: { observation?: string | null }) =>
+      movement.observation?.includes(`Ajuste #${createAdjustmentResponse.body.id}`),
+  );
+  assert.ok(adjustmentMovement);
+  assert.equal(adjustmentMovement.type, "exit");
+  assert.equal(adjustmentMovement.quantity, 8);
+
   const operatorAdjustmentResponse = await operatorAgent.post("/api/adjustments").send({
     warehouseId: warehouseResponse.body.id,
     productId: productResponse.body.id,
@@ -1257,6 +1391,11 @@ test("ubicaciones, lookup por sku barcode y ajustes respetan permisos por rol", 
   assert.equal(stockByLocationResponse.status, 200);
   assert.equal(stockByLocationResponse.body[0].quantity, 12);
   assert.equal(stockByLocationResponse.body[0].warehouseLocationId, createLocationResponse.body.id);
+  await assertMovementLedgerMatchesStock({
+    warehouseId: warehouseResponse.body.id,
+    warehouseLocationId: createLocationResponse.body.id,
+    productId: productResponse.body.id,
+  });
 });
 
 test("transferencias y conteos ciclicos mantienen consistencia y bloquean stock negativo", async () => {
@@ -1352,10 +1491,14 @@ test("transferencias y conteos ciclicos mantienen consistencia y bloquean stock 
     toLocationId: locationBResponse.body.id,
     productId: productResponse.body.id,
     quantity: 6,
+    manualDestination: "Cafeteria Central",
+    carrierName: "Ruta Norte",
     notes: "Reposicion entre almacenes",
   });
   assert.equal(createTransferResponse.status, 201);
   assert.equal(createTransferResponse.body.status, "pending");
+  assert.equal(createTransferResponse.body.manualDestination, "Cafeteria Central");
+  assert.equal(createTransferResponse.body.carrierName, "Ruta Norte");
 
   const operatorApproveResponse = await operatorAgent
     .patch(`/api/transfers/${createTransferResponse.body.id}/approve`)
@@ -1374,6 +1517,22 @@ test("transferencias y conteos ciclicos mantienen consistencia y bloquean stock 
   assert.equal(completeTransferResponse.status, 200);
   assert.equal(completeTransferResponse.body.status, "completed");
 
+  const transferMovementsResponse = await managerAgent.get("/api/inventory/movements?limit=20");
+  assert.equal(transferMovementsResponse.status, 200);
+  const completedTransferMovements = transferMovementsResponse.body.filter(
+    (movement: { observation?: string | null }) =>
+      movement.observation?.includes(`Transferencia #${createTransferResponse.body.id}`),
+  );
+  assert.equal(completedTransferMovements.length, 2);
+  assert.equal(
+    completedTransferMovements.filter((movement: { type: string }) => movement.type === "entry").length,
+    1,
+  );
+  assert.equal(
+    completedTransferMovements.filter((movement: { type: string }) => movement.type === "exit").length,
+    1,
+  );
+
   const stockAAfterTransfer = await managerAgent.get(
     `/api/inventory/stock?productId=${productResponse.body.id}&warehouseId=${warehouseAResponse.body.id}&warehouseLocationId=${locationAResponse.body.id}`,
   );
@@ -1385,6 +1544,16 @@ test("transferencias y conteos ciclicos mantienen consistencia y bloquean stock 
   );
   assert.equal(stockBAfterTransfer.status, 200);
   assert.equal(stockBAfterTransfer.body[0].quantity, 6);
+  await assertMovementLedgerMatchesStock({
+    warehouseId: warehouseAResponse.body.id,
+    warehouseLocationId: locationAResponse.body.id,
+    productId: productResponse.body.id,
+  });
+  await assertMovementLedgerMatchesStock({
+    warehouseId: warehouseBResponse.body.id,
+    warehouseLocationId: locationBResponse.body.id,
+    productId: productResponse.body.id,
+  });
 
   const blockedTransferResponse = await managerAgent.post("/api/transfers").send({
     fromWarehouseId: warehouseAResponse.body.id,
@@ -1423,6 +1592,26 @@ test("transferencias y conteos ciclicos mantienen consistencia y bloquean stock 
     .send({});
   assert.equal(cancelResultResponse.status, 200);
   assert.equal(cancelResultResponse.body.status, "cancelled");
+
+  const transferReportResponse = await managerAgent.get("/api/reports/transfers/export?format=excel");
+  assert.equal(transferReportResponse.status, 200);
+  assert.match(
+    transferReportResponse.headers["content-type"],
+    /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/,
+  );
+  assert.match(
+    transferReportResponse.headers["content-disposition"],
+    /transfers-report-.*\.xlsx/,
+  );
+  const workbook = XLSX.read(transferReportResponse.body, { type: "buffer" });
+  const transferSheet = workbook.Sheets[workbook.SheetNames[0] ?? ""];
+  assert.ok(transferSheet);
+  const transferRows = XLSX.utils.sheet_to_json<(string | number)[]>(transferSheet, { header: 1 });
+  assert.ok(transferRows.length > 0);
+
+  const transferPdfResponse = await managerAgent.get("/api/reports/transfers/export?format=pdf");
+  assert.equal(transferPdfResponse.status, 200);
+  assert.match(transferPdfResponse.headers["content-type"], /application\/pdf/);
 
   const createCycleCountResponse = await managerAgent.post("/api/cycle-counts").send({
     warehouseId: warehouseBResponse.body.id,
@@ -1463,13 +1652,177 @@ test("transferencias y conteos ciclicos mantienen consistencia y bloquean stock 
   assert.equal(completeCycleCountResponse.body.status, "completed");
   assert.equal(completeCycleCountResponse.body.items[0].difference, -2);
 
+  const cycleCountMovementsResponse = await managerAgent.get("/api/inventory/movements?limit=20");
+  assert.equal(cycleCountMovementsResponse.status, 200);
+  const cycleCountMovement = cycleCountMovementsResponse.body.find(
+    (movement: { observation?: string | null }) =>
+      movement.observation?.includes(`Conteo ciclico #${createCycleCountResponse.body.id}`),
+  );
+  assert.ok(cycleCountMovement);
+  assert.equal(cycleCountMovement.type, "exit");
+  assert.equal(cycleCountMovement.quantity, 2);
+
   const stockBAfterCycleCount = await managerAgent.get(
     `/api/inventory/stock?productId=${productResponse.body.id}&warehouseId=${warehouseBResponse.body.id}&warehouseLocationId=${locationBResponse.body.id}`,
   );
   assert.equal(stockBAfterCycleCount.status, 200);
   assert.equal(stockBAfterCycleCount.body[0].quantity, 4);
+  await assertMovementLedgerMatchesStock({
+    warehouseId: warehouseBResponse.body.id,
+    warehouseLocationId: locationBResponse.body.id,
+    productId: productResponse.body.id,
+  });
 
   const cycleCountsListResponse = await operatorAgent.get("/api/cycle-counts");
   assert.equal(cycleCountsListResponse.status, 200);
   assert.equal(cycleCountsListResponse.body.length, 1);
+});
+
+test("despachos crean lineas y descuentan stock consolidado sin romper transferencias", async () => {
+  const adminAgent = await createAdminAgent();
+
+  const warehouseResponse = await adminAgent.post("/api/warehouses").send({
+    name: "Dispatch Warehouse",
+    description: "Warehouse used for dispatch tests",
+  });
+  assert.equal(warehouseResponse.status, 201);
+
+  const categoryResponse = await adminAgent.post("/api/categories").send({
+    name: "Dispatch Category",
+    description: "Dispatch test category",
+  });
+  assert.equal(categoryResponse.status, 201);
+
+  const productOneResponse = await adminAgent.post("/api/products").send({
+    name: "Coffee Beans",
+    description: "Dispatchable stock",
+    categoryId: categoryResponse.body.id,
+    price: 12.5,
+    minimumStock: 2,
+  });
+  assert.equal(productOneResponse.status, 201);
+
+  const productTwoResponse = await adminAgent.post("/api/products").send({
+    name: "Paper Cups",
+    description: "Secondary dispatch stock",
+    categoryId: categoryResponse.body.id,
+    price: 3.25,
+    minimumStock: 5,
+  });
+  assert.equal(productTwoResponse.status, 201);
+
+  const stockEntryOneResponse = await adminAgent.post("/api/inventory/movements").send({
+    productId: productOneResponse.body.id,
+    warehouseId: warehouseResponse.body.id,
+    type: "entry",
+    quantity: 10,
+    movementDate: "2026-03-18T18:00:00.000Z",
+    observation: "Dispatch stock one",
+  });
+  assert.equal(stockEntryOneResponse.status, 201);
+
+  const stockEntryTwoResponse = await adminAgent.post("/api/inventory/movements").send({
+    productId: productTwoResponse.body.id,
+    warehouseId: warehouseResponse.body.id,
+    type: "entry",
+    quantity: 6,
+    movementDate: "2026-03-18T18:05:00.000Z",
+    observation: "Dispatch stock two",
+  });
+  assert.equal(stockEntryTwoResponse.status, 201);
+
+  const dispatchResponse = await adminAgent.post("/api/dispatches").send({
+    manualDestination: "Cafeteria Central",
+    carrierName: "Ruta Norte",
+    notes: "Despacho inicial de prueba",
+    items: [
+      {
+        productId: productOneResponse.body.id,
+        quantity: 4,
+        unitPrice: 999.99,
+      },
+      {
+        productId: productTwoResponse.body.id,
+        quantity: 2,
+        unitPrice: 0.01,
+      },
+    ],
+  });
+  assert.equal(dispatchResponse.status, 201);
+  assert.equal(dispatchResponse.body.manualDestination, "Cafeteria Central");
+  assert.equal(dispatchResponse.body.carrierName, "Ruta Norte");
+  assert.equal(dispatchResponse.body.items.length, 2);
+  assert.equal(dispatchResponse.body.totalAmount, 56.5);
+  assert.equal(dispatchResponse.body.items[0].unitPrice, 12.5);
+  assert.equal(dispatchResponse.body.items[1].unitPrice, 3.25);
+
+  const dispatchMovementsResponse = await adminAgent.get("/api/inventory/movements?limit=20");
+  assert.equal(dispatchMovementsResponse.status, 200);
+  const dispatchExitMovements = dispatchMovementsResponse.body.filter(
+    (movement: { observation?: string | null; type: string }) =>
+      movement.type === "exit" && movement.observation?.includes(`Despacho #${dispatchResponse.body.id}`),
+  );
+  assert.equal(dispatchExitMovements.length, 2);
+  assert.ok(dispatchExitMovements.every((movement: { observation?: string | null }) =>
+    movement.observation?.includes("Cafeteria Central") &&
+    movement.observation?.includes("Ruta Norte"),
+  ));
+
+  const productOneStockResponse = await adminAgent.get(
+    `/api/inventory/stock?productId=${productOneResponse.body.id}&warehouseId=${warehouseResponse.body.id}`,
+  );
+  assert.equal(productOneStockResponse.status, 200);
+  assert.equal(productOneStockResponse.body[0].quantity, 6);
+
+  const productTwoStockResponse = await adminAgent.get(
+    `/api/inventory/stock?productId=${productTwoResponse.body.id}&warehouseId=${warehouseResponse.body.id}`,
+  );
+  assert.equal(productTwoStockResponse.status, 200);
+  assert.equal(productTwoStockResponse.body[0].quantity, 4);
+
+  const dispatchPdfResponse = await adminAgent.get(
+    `/api/dispatches/${dispatchResponse.body.id}/export?format=pdf`,
+  );
+  assert.equal(dispatchPdfResponse.status, 200);
+  assert.equal(dispatchPdfResponse.headers["content-type"], "application/pdf");
+
+  const dispatchExcelResponse = await adminAgent.get(
+    `/api/dispatches/${dispatchResponse.body.id}/export?format=excel`,
+  );
+  assert.equal(dispatchExcelResponse.status, 200);
+  assert.equal(
+    dispatchExcelResponse.headers["content-type"],
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  );
+
+  const dispatchOdfResponse = await adminAgent.get(
+    `/api/dispatches/${dispatchResponse.body.id}/export?format=odf`,
+  );
+  assert.equal(dispatchOdfResponse.status, 200);
+  assert.equal(
+    dispatchOdfResponse.headers["content-type"],
+    "application/vnd.oasis.opendocument.spreadsheet",
+  );
+
+  const dispatchListResponse = await adminAgent.get("/api/dispatches");
+  assert.equal(dispatchListResponse.status, 200);
+  assert.ok(dispatchListResponse.body.length >= 1);
+  const createdDispatchFromList = dispatchListResponse.body.find(
+    (dispatch: { id: number; items: unknown[] }) => dispatch.id === dispatchResponse.body.id,
+  );
+  assert.ok(createdDispatchFromList);
+  assert.equal(createdDispatchFromList.items.length, 2);
+
+  const insufficientDispatchResponse = await adminAgent.post("/api/dispatches").send({
+    manualDestination: "Restaurante Sur",
+    carrierName: "Ruta Sur",
+    items: [
+      {
+        productId: productTwoResponse.body.id,
+        quantity: 99,
+        unitPrice: 3.25,
+      },
+    ],
+  });
+  assert.equal(insufficientDispatchResponse.status, 400);
 });

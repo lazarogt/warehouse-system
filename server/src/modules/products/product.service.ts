@@ -1,6 +1,7 @@
-import type { PoolClient } from "pg";
+import type { DatabaseClient } from "../../lib/db";
 import type {
   Product,
+  ProductAttribute,
   ProductAttributeInput,
   ProductFilters,
   ProductInput,
@@ -8,41 +9,17 @@ import type {
 } from "../../../../shared/src";
 import { AppError } from "../../common/errors";
 import { activeFilter } from "../../common/soft-delete";
-import { query, withTransaction } from "../../config/db";
+import { query, withTransaction } from "../../lib/db";
 import { listActiveCategoryAttributes } from "../category-attributes/category-attribute.service";
 import { normalizeDynamicAttributeValue } from "./product-attribute.utils";
 
-type ProductRow = Product;
+type ProductRow = Omit<Product, "attributes">;
 type EntityIdRow = { id: number };
 type ProductIdentityRow = { id: number; categoryId: number };
-
-const productAttributesJson = (productIdReference: string) => `
-  COALESCE(
-    (
-      SELECT json_agg(
-        json_build_object(
-          'id', pa.id,
-          'productId', pa.product_id,
-          'categoryAttributeId', pa.category_attribute_id,
-          'key', ca.key,
-          'label', ca.label,
-          'type', ca.type,
-          'required', ca.required,
-          'options', ca.options,
-          'sortOrder', ca.sort_order,
-          'value', pa.value,
-          'createdAt', pa.created_at,
-          'updatedAt', pa.updated_at
-        )
-        ORDER BY ca.sort_order ASC, ca.id ASC
-      )
-      FROM product_attributes pa
-      JOIN category_attributes ca ON ca.id = pa.category_attribute_id
-      WHERE pa.product_id = ${productIdReference}
-    ),
-    '[]'::json
-  ) AS attributes
-`;
+type ProductAttributeRow = Omit<ProductAttribute, "required" | "options"> & {
+  required: number | boolean;
+  options: string | null;
+};
 
 const productListingCte = `
   WITH product_stock AS (
@@ -88,7 +65,81 @@ const productListingCte = `
   )
 `;
 
-const ensureCategoryExists = async (categoryId: number, client?: PoolClient) => {
+const parseOptions = (value: string | null) => {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : null;
+  } catch {
+    return null;
+  }
+};
+
+const mapProductAttributeRow = (row: ProductAttributeRow): ProductAttribute => ({
+  ...row,
+  required: row.required === true || row.required === 1,
+  options: parseOptions(row.options),
+});
+
+const loadAttributesByProductIds = async (
+  productIds: number[],
+  client?: DatabaseClient,
+) => {
+  if (productIds.length === 0) {
+    return new Map<number, ProductAttribute[]>();
+  }
+
+  const placeholders = productIds.map(() => "?").join(", ");
+  const sql = `
+    SELECT
+      pa.id,
+      pa.product_id AS "productId",
+      pa.category_attribute_id AS "categoryAttributeId",
+      ca.key,
+      ca.label,
+      ca.type,
+      ca.required,
+      ca.options,
+      ca.sort_order AS "sortOrder",
+      pa.value,
+      pa.created_at AS "createdAt",
+      pa.updated_at AS "updatedAt"
+    FROM product_attributes pa
+    JOIN category_attributes ca ON ca.id = pa.category_attribute_id
+    WHERE pa.product_id IN (${placeholders})
+    ORDER BY pa.product_id ASC, ca.sort_order ASC, ca.id ASC;
+  `;
+  const result = client
+    ? await client.query<ProductAttributeRow>(sql, productIds)
+    : await query<ProductAttributeRow>(sql, productIds);
+
+  const attributesByProductId = new Map<number, ProductAttribute[]>();
+
+  for (const row of result.rows) {
+    const attributes = attributesByProductId.get(row.productId) ?? [];
+    attributes.push(mapProductAttributeRow(row));
+    attributesByProductId.set(row.productId, attributes);
+  }
+
+  return attributesByProductId;
+};
+
+const hydrateProducts = async (rows: ProductRow[], client?: DatabaseClient): Promise<Product[]> => {
+  const attributesByProductId = await loadAttributesByProductIds(
+    rows.map((row) => row.id),
+    client,
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    attributes: attributesByProductId.get(row.id) ?? [],
+  }));
+};
+
+const ensureCategoryExists = async (categoryId: number, client?: DatabaseClient) => {
   const result = client
     ? await client.query<EntityIdRow>("SELECT id FROM categories WHERE id = $1;", [categoryId])
     : await query<EntityIdRow>("SELECT id FROM categories WHERE id = $1;", [categoryId]);
@@ -98,7 +149,7 @@ const ensureCategoryExists = async (categoryId: number, client?: PoolClient) => 
   }
 };
 
-const ensureUniqueSku = async (sku: string | null | undefined, excludeProductId?: number, client?: PoolClient) => {
+const ensureUniqueSku = async (sku: string | null | undefined, excludeProductId?: number, client?: DatabaseClient) => {
   if (!sku) {
     return;
   }
@@ -108,7 +159,7 @@ const ensureUniqueSku = async (sku: string | null | undefined, excludeProductId?
     FROM products
     WHERE sku = $1
       AND ${activeFilter()}
-      AND ($2::bigint IS NULL OR id <> $2);
+      AND ($2 IS NULL OR id <> $2);
   `;
   const values = [sku, excludeProductId ?? null];
   const result = client
@@ -123,7 +174,7 @@ const ensureUniqueSku = async (sku: string | null | undefined, excludeProductId?
 const ensureUniqueBarcode = async (
   barcode: string | null | undefined,
   excludeProductId?: number,
-  client?: PoolClient,
+  client?: DatabaseClient,
 ) => {
   if (!barcode) {
     return;
@@ -134,7 +185,7 @@ const ensureUniqueBarcode = async (
     FROM products
     WHERE barcode = $1
       AND ${activeFilter()}
-      AND ($2::bigint IS NULL OR id <> $2);
+      AND ($2 IS NULL OR id <> $2);
   `;
   const values = [barcode, excludeProductId ?? null];
   const result = client
@@ -149,7 +200,7 @@ const ensureUniqueBarcode = async (
 const validateProductAttributes = async (
   categoryId: number,
   attributes: ProductAttributeInput[] | undefined,
-  client?: PoolClient,
+  client?: DatabaseClient,
 ) => {
   const definitions = await listActiveCategoryAttributes(categoryId, client);
   const definitionMap = new Map(definitions.map((definition) => [definition.id, definition]));
@@ -191,63 +242,65 @@ const validateProductAttributes = async (
 };
 
 const syncProductAttributes = async (
-  client: PoolClient,
+  client: DatabaseClient,
   productId: number,
   categoryId: number,
   attributes: Array<{ categoryAttributeId: number; value: string }>,
 ) => {
   const attributeIds = attributes.map((attribute) => attribute.categoryAttributeId);
+  const activeAttributeRows = await client.query<{ id: number }>(
+    `
+      SELECT id
+      FROM category_attributes
+      WHERE category_id = $1
+        AND active = TRUE;
+    `,
+    [categoryId],
+  );
+  const activeAttributeIds = activeAttributeRows.rows.map((row) => row.id);
 
   if (attributeIds.length === 0) {
+    for (const activeAttributeId of activeAttributeIds) {
+      await client.query(
+        `
+          DELETE FROM product_attributes
+          WHERE product_id = $1
+            AND category_attribute_id = $2;
+        `,
+        [productId, activeAttributeId],
+      );
+    }
+    return;
+  }
+
+  for (const activeAttributeId of activeAttributeIds) {
+    if (attributeIds.includes(activeAttributeId)) {
+      continue;
+    }
+
     await client.query(
       `
         DELETE FROM product_attributes
         WHERE product_id = $1
-          AND category_attribute_id IN (
-            SELECT id
-            FROM category_attributes
-            WHERE category_id = $2
-              AND active = TRUE
-          );
+          AND category_attribute_id = $2;
       `,
-      [productId, categoryId],
+      [productId, activeAttributeId],
     );
-    return;
   }
 
-  await client.query(
-    `
-      DELETE FROM product_attributes
-      WHERE product_id = $1
-        AND category_attribute_id IN (
-          SELECT id
-          FROM category_attributes
-          WHERE category_id = $2
-            AND active = TRUE
-        )
-        AND NOT (category_attribute_id = ANY($3::bigint[]));
-    `,
-    [productId, categoryId, attributeIds],
-  );
-
-  const values: unknown[] = [];
-  const placeholders = attributes.map((attribute, index) => {
-    const baseIndex = index * 3;
-    values.push(productId, attribute.categoryAttributeId, attribute.value);
-    return `($${baseIndex + 1}, $${baseIndex + 2}, $${baseIndex + 3})`;
-  });
-
-  await client.query(
-    `
-      INSERT INTO product_attributes (product_id, category_attribute_id, value)
-      VALUES ${placeholders.join(", ")}
-      ON CONFLICT (product_id, category_attribute_id)
-      DO UPDATE SET
-        value = EXCLUDED.value,
-        updated_at = NOW();
-    `,
-    values,
-  );
+  for (const attribute of attributes) {
+    await client.query(
+      `
+        INSERT INTO product_attributes (product_id, category_attribute_id, value)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (product_id, category_attribute_id)
+        DO UPDATE SET
+          value = excluded.value,
+          updated_at = NOW();
+      `,
+      [productId, attribute.categoryAttributeId, attribute.value],
+    );
+  }
 };
 
 export const listProducts = async (filters: ProductFilters): Promise<ProductListResponse> => {
@@ -276,8 +329,7 @@ export const listProducts = async (filters: ProductFilters): Promise<ProductList
     `
       ${productListingCte}
       SELECT
-        product_stock.*,
-        ${productAttributesJson("product_stock.id")}
+        product_stock.*
       FROM product_stock
       WHERE ($5::int IS NULL OR "minimumStock" <= $5)
         AND ($6::int IS NULL OR "currentStock" <= $6)
@@ -297,14 +349,14 @@ export const listProducts = async (filters: ProductFilters): Promise<ProductList
   );
 
   return {
-    items: result.rows,
+    items: await hydrateProducts(result.rows),
     total: totalResult.rows[0]?.total ?? 0,
     page,
     pageSize,
   };
 };
 
-export const getProductById = async (id: number, client?: PoolClient) => {
+export const getProductById = async (id: number, client?: DatabaseClient) => {
   const sql = `
     SELECT
       p.id,
@@ -317,7 +369,6 @@ export const getProductById = async (id: number, client?: PoolClient) => {
       p.price::float8 AS "price",
       p.minimum_stock AS "minimumStock",
       COALESCE(SUM(ws.quantity), 0)::int AS "currentStock",
-      ${productAttributesJson("p.id")},
       p.created_at AS "createdAt",
       p.updated_at AS "updatedAt"
     FROM products p
@@ -333,7 +384,11 @@ export const getProductById = async (id: number, client?: PoolClient) => {
     ? await client.query<ProductRow>(sql, [id])
     : await query<ProductRow>(sql, [id]);
 
-  return result.rows[0] ?? null;
+  if (!result.rows[0]) {
+    return null;
+  }
+
+  return (await hydrateProducts([result.rows[0]], client))[0] ?? null;
 };
 
 export const createProduct = async (input: ProductInput) => {

@@ -1,45 +1,47 @@
-import type { PoolClient } from "pg";
+import type { DatabaseClient } from "../../lib/db";
 import type { StockLevel, StockMovement, StockMovementInput } from "../../../../shared/src";
 import { AppError } from "../../common/errors";
 import { activeFilter } from "../../common/soft-delete";
-import { query } from "../../config/db";
+import { query } from "../../lib/db";
 
 type EntityIdRow = { id: number };
 type QuantityRow = { quantity: number };
+type WarehouseStockRow = { warehouseId: number; quantity: number };
+type LocationStockRow = { warehouseLocationId: number; quantity: number };
 
-export const assertWarehouseExists = async (warehouseId: number, client?: PoolClient) => {
+export const assertWarehouseExists = (warehouseId: number, client?: DatabaseClient) => {
   const result = client
-    ? await client.query<EntityIdRow>(
+    ? client.query<EntityIdRow>(
         `SELECT id FROM warehouses WHERE id = $1 AND ${activeFilter()};`,
         [warehouseId],
       )
-    : await query<EntityIdRow>(`SELECT id FROM warehouses WHERE id = $1 AND ${activeFilter()};`, [warehouseId]);
+    : query<EntityIdRow>(`SELECT id FROM warehouses WHERE id = $1 AND ${activeFilter()};`, [warehouseId]);
 
   if (!result.rows[0]) {
     throw new AppError(400, "warehouseId must reference an existing warehouse.");
   }
 };
 
-export const assertProductExists = async (productId: number, client?: PoolClient) => {
+export const assertProductExists = (productId: number, client?: DatabaseClient) => {
   const result = client
-    ? await client.query<EntityIdRow>(
+    ? client.query<EntityIdRow>(
         `SELECT id FROM products WHERE id = $1 AND ${activeFilter()};`,
         [productId],
       )
-    : await query<EntityIdRow>(`SELECT id FROM products WHERE id = $1 AND ${activeFilter()};`, [productId]);
+    : query<EntityIdRow>(`SELECT id FROM products WHERE id = $1 AND ${activeFilter()};`, [productId]);
 
   if (!result.rows[0]) {
     throw new AppError(400, "productId must reference an existing product.");
   }
 };
 
-export const assertLocationExists = async (locationId: number, client?: PoolClient) => {
+export const assertLocationExists = (locationId: number, client?: DatabaseClient) => {
   const result = client
-    ? await client.query<EntityIdRow>(
+    ? client.query<EntityIdRow>(
         `SELECT id FROM warehouse_locations WHERE id = $1 AND ${activeFilter()};`,
         [locationId],
       )
-    : await query<EntityIdRow>(
+    : query<EntityIdRow>(
         `SELECT id FROM warehouse_locations WHERE id = $1 AND ${activeFilter()};`,
         [locationId],
       );
@@ -49,13 +51,13 @@ export const assertLocationExists = async (locationId: number, client?: PoolClie
   }
 };
 
-export const assertLocationBelongsToWarehouse = async (
+export const assertLocationBelongsToWarehouse = (
   locationId: number,
   warehouseId: number,
-  client?: PoolClient,
+  client?: DatabaseClient,
 ) => {
   const result = client
-    ? await client.query<EntityIdRow>(
+    ? client.query<EntityIdRow>(
         `
           SELECT id
           FROM warehouse_locations
@@ -66,7 +68,7 @@ export const assertLocationBelongsToWarehouse = async (
         `,
         [locationId, warehouseId],
       )
-    : await query<EntityIdRow>(
+    : query<EntityIdRow>(
         `
           SELECT id
           FROM warehouse_locations
@@ -83,12 +85,12 @@ export const assertLocationBelongsToWarehouse = async (
   }
 };
 
-const ensureWarehouseStockRow = async (
-  client: PoolClient,
+const ensureWarehouseStockRow = (
+  client: DatabaseClient,
   warehouseId: number,
   productId: number,
 ) => {
-  await client.query(
+  client.query(
     `
       INSERT INTO warehouse_stock (warehouse_id, product_id, quantity)
       VALUES ($1, $2, 0)
@@ -98,12 +100,12 @@ const ensureWarehouseStockRow = async (
   );
 };
 
-const ensureLocationStockRow = async (
-  client: PoolClient,
+const ensureLocationStockRow = (
+  client: DatabaseClient,
   warehouseLocationId: number,
   productId: number,
 ) => {
-  await client.query(
+  client.query(
     `
       INSERT INTO warehouse_location_stock (warehouse_location_id, product_id, quantity)
       VALUES ($1, $2, 0)
@@ -113,13 +115,13 @@ const ensureLocationStockRow = async (
   );
 };
 
-export const getCurrentWarehouseQuantityForUpdate = async (
-  client: PoolClient,
+export const getCurrentWarehouseQuantityForUpdate = (
+  client: DatabaseClient,
   warehouseId: number,
   productId: number,
 ) => {
-  await ensureWarehouseStockRow(client, warehouseId, productId);
-  const result = await client.query<QuantityRow>(
+  ensureWarehouseStockRow(client, warehouseId, productId);
+  const result = client.query<QuantityRow>(
     `
       SELECT quantity
       FROM warehouse_stock
@@ -133,13 +135,13 @@ export const getCurrentWarehouseQuantityForUpdate = async (
   return result.rows[0]?.quantity ?? 0;
 };
 
-export const getCurrentLocationQuantityForUpdate = async (
-  client: PoolClient,
+export const getCurrentLocationQuantityForUpdate = (
+  client: DatabaseClient,
   warehouseLocationId: number,
   productId: number,
 ) => {
-  await ensureLocationStockRow(client, warehouseLocationId, productId);
-  const result = await client.query<QuantityRow>(
+  ensureLocationStockRow(client, warehouseLocationId, productId);
+  const result = client.query<QuantityRow>(
     `
       SELECT quantity
       FROM warehouse_location_stock
@@ -153,8 +155,8 @@ export const getCurrentLocationQuantityForUpdate = async (
   return result.rows[0]?.quantity ?? 0;
 };
 
-export const applyStockDelta = async (
-  client: PoolClient,
+export const applyStockDelta = (
+  client: DatabaseClient,
   input: {
     warehouseId: number;
     warehouseLocationId?: number | null;
@@ -162,7 +164,7 @@ export const applyStockDelta = async (
     delta: number;
   },
 ) => {
-  const currentWarehouseQuantity = await getCurrentWarehouseQuantityForUpdate(
+  const currentWarehouseQuantity = getCurrentWarehouseQuantityForUpdate(
     client,
     input.warehouseId,
     input.productId,
@@ -173,7 +175,7 @@ export const applyStockDelta = async (
     throw new AppError(400, "Stock cannot become negative.");
   }
 
-  await client.query(
+  client.query(
     `
       UPDATE warehouse_stock
       SET quantity = $3, updated_at = NOW()
@@ -186,7 +188,7 @@ export const applyStockDelta = async (
   let nextLocationQuantity: number | null = null;
 
   if (input.warehouseLocationId) {
-    const currentLocationQuantity = await getCurrentLocationQuantityForUpdate(
+    const currentLocationQuantity = getCurrentLocationQuantityForUpdate(
       client,
       input.warehouseLocationId,
       input.productId,
@@ -197,7 +199,7 @@ export const applyStockDelta = async (
       throw new AppError(400, "Location stock cannot become negative.");
     }
 
-    await client.query(
+    client.query(
       `
         UPDATE warehouse_location_stock
         SET quantity = $3, updated_at = NOW()
@@ -214,12 +216,117 @@ export const applyStockDelta = async (
   };
 };
 
-export const insertStockMovement = async (
-  client: PoolClient,
+export const consumeProductStock = (
+  client: DatabaseClient,
+  input: {
+    productId: number;
+    quantity: number;
+  },
+) => {
+  const allocations: Array<{
+    warehouseId: number;
+    warehouseLocationId: number | null;
+    quantity: number;
+  }> = [];
+  const warehouseStockRows = client.query<WarehouseStockRow>(
+    `
+      SELECT
+        ws.warehouse_id AS "warehouseId",
+        ws.quantity
+      FROM warehouse_stock ws
+      JOIN warehouses w ON w.id = ws.warehouse_id
+      WHERE ws.product_id = $1
+        AND ws.quantity > 0
+        AND ${activeFilter("w")}
+      ORDER BY ws.quantity DESC, ws.warehouse_id ASC
+      FOR UPDATE OF ws;
+    `,
+    [input.productId],
+  );
+
+  const totalAvailable = warehouseStockRows.rows.reduce((sum, row) => sum + row.quantity, 0);
+
+  if (totalAvailable < input.quantity) {
+    throw new AppError(400, "Stock cannot become negative.");
+  }
+
+  let remaining = input.quantity;
+
+  for (const warehouseRow of warehouseStockRows.rows) {
+    if (remaining <= 0) {
+      break;
+    }
+
+    let warehouseRemaining = Math.min(warehouseRow.quantity, remaining);
+    const locationStockRows = client.query<LocationStockRow>(
+      `
+        SELECT
+          wls.warehouse_location_id AS "warehouseLocationId",
+          wls.quantity
+        FROM warehouse_location_stock wls
+        JOIN warehouse_locations wl ON wl.id = wls.warehouse_location_id
+        WHERE wls.product_id = $1
+          AND wl.warehouse_id = $2
+          AND wls.quantity > 0
+          AND ${activeFilter("wl")}
+        ORDER BY wls.quantity DESC, wls.warehouse_location_id ASC
+        FOR UPDATE OF wls;
+      `,
+      [input.productId, warehouseRow.warehouseId],
+    );
+
+    for (const locationRow of locationStockRows.rows) {
+      if (warehouseRemaining <= 0) {
+        break;
+      }
+
+      const locationTake = Math.min(locationRow.quantity, warehouseRemaining);
+
+      applyStockDelta(client, {
+        warehouseId: warehouseRow.warehouseId,
+        warehouseLocationId: locationRow.warehouseLocationId,
+        productId: input.productId,
+        delta: -locationTake,
+      });
+      allocations.push({
+        warehouseId: warehouseRow.warehouseId,
+        warehouseLocationId: locationRow.warehouseLocationId,
+        quantity: locationTake,
+      });
+
+      warehouseRemaining -= locationTake;
+      remaining -= locationTake;
+    }
+
+    if (warehouseRemaining > 0) {
+      applyStockDelta(client, {
+        warehouseId: warehouseRow.warehouseId,
+        productId: input.productId,
+        delta: -warehouseRemaining,
+      });
+      allocations.push({
+        warehouseId: warehouseRow.warehouseId,
+        warehouseLocationId: null,
+        quantity: warehouseRemaining,
+      });
+
+      remaining -= warehouseRemaining;
+    }
+  }
+
+  if (remaining > 0) {
+    throw new AppError(400, "Stock cannot become negative.");
+  }
+
+  return allocations;
+};
+
+export const insertStockMovement = (
+  client: DatabaseClient,
   input: StockMovementInput,
   userId: number,
 ) => {
-  const result = await client.query<{ id: number }>(
+  const result = client.query<{ id: number }>(
     `
       INSERT INTO stock_movements (
         product_id,
@@ -249,11 +356,48 @@ export const insertStockMovement = async (
   return result.rows[0]?.id;
 };
 
-export const getStockLevelByProductWarehouseAndLocation = async (
+export const insertStockMovementForDelta = (
+  client: DatabaseClient,
+  input: {
+    warehouseId: number;
+    warehouseLocationId?: number | null;
+    productId: number;
+    delta: number;
+    userId: number;
+    movementDate?: string;
+    observation?: string | null;
+  },
+) => {
+  if (input.delta === 0) {
+    return null;
+  }
+
+  const movementId = insertStockMovement(
+    client,
+    {
+      productId: input.productId,
+      warehouseId: input.warehouseId,
+      warehouseLocationId: input.warehouseLocationId ?? null,
+      type: input.delta > 0 ? "entry" : "exit",
+      quantity: Math.abs(input.delta),
+      movementDate: input.movementDate ?? new Date().toISOString(),
+      observation: input.observation ?? null,
+    },
+    input.userId,
+  );
+
+  if (!movementId) {
+    throw new AppError(500, "Unable to save stock movement.");
+  }
+
+  return movementId;
+};
+
+export const getStockLevelByProductWarehouseAndLocation = (
   productId: number,
   warehouseId: number,
   warehouseLocationId?: number | null,
-  client?: PoolClient,
+  client?: DatabaseClient,
 ) => {
   if (warehouseLocationId) {
     const sql = `
@@ -279,8 +423,8 @@ export const getStockLevelByProductWarehouseAndLocation = async (
     `;
 
     const result = client
-      ? await client.query<StockLevel>(sql, [productId, warehouseId, warehouseLocationId])
-      : await query<StockLevel>(sql, [productId, warehouseId, warehouseLocationId]);
+      ? client.query<StockLevel>(sql, [productId, warehouseId, warehouseLocationId])
+      : query<StockLevel>(sql, [productId, warehouseId, warehouseLocationId]);
 
     return result.rows[0] ?? null;
   }
@@ -306,20 +450,20 @@ export const getStockLevelByProductWarehouseAndLocation = async (
   `;
 
   const result = client
-    ? await client.query<StockLevel>(sql, [productId, warehouseId])
-    : await query<StockLevel>(sql, [productId, warehouseId]);
+    ? client.query<StockLevel>(sql, [productId, warehouseId])
+    : query<StockLevel>(sql, [productId, warehouseId]);
 
   return result.rows[0] ?? null;
 };
 
-export const listStockLevels = async (filters: {
+export const listStockLevels = (filters: {
   productId?: number;
   warehouseId?: number;
   warehouseLocationId?: number;
 }) => {
   if (filters.warehouseLocationId !== undefined) {
     return (
-      await query<StockLevel>(
+      query<StockLevel>(
         `
           SELECT
             wls.product_id AS "productId",
@@ -352,7 +496,7 @@ export const listStockLevels = async (filters: {
   }
 
   return (
-    await query<StockLevel>(
+    query<StockLevel>(
       `
         SELECT
           ws.product_id AS "productId",
@@ -377,9 +521,9 @@ export const listStockLevels = async (filters: {
   ).rows;
 };
 
-export const listDetailedStockMovements = async (limit: number) => {
+export const listDetailedStockMovements = (limit: number) => {
   return (
-    await query<StockMovement>(
+    query<StockMovement>(
       `
         SELECT
           sm.id,
@@ -410,7 +554,7 @@ export const listDetailedStockMovements = async (limit: number) => {
   ).rows;
 };
 
-export const getDetailedStockMovementById = async (id: number, client?: PoolClient) => {
+export const getDetailedStockMovementById = (id: number, client?: DatabaseClient) => {
   const sql = `
     SELECT
       sm.id,
@@ -437,8 +581,8 @@ export const getDetailedStockMovementById = async (id: number, client?: PoolClie
   `;
 
   const result = client
-    ? await client.query<StockMovement>(sql, [id])
-    : await query<StockMovement>(sql, [id]);
+    ? client.query<StockMovement>(sql, [id])
+    : query<StockMovement>(sql, [id]);
 
   return result.rows[0] ?? null;
 };

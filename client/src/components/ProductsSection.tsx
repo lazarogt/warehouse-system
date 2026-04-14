@@ -10,6 +10,7 @@ import type {
 import { useAuth } from "../auth/AuthProvider";
 import { createApiClient, getErrorMessage, saveDownloadedFile } from "../lib/api";
 import { safeArray } from "../lib/format";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
 import ConfirmDialog from "./ConfirmDialog";
 import ProductDetailsModal from "./ProductDetailsModal";
 import ProductForm from "./ProductForm";
@@ -27,6 +28,7 @@ type ProductsSectionProps = {
 
 type ProductsSectionState = {
   loading: boolean;
+  categoriesLoading: boolean;
   saving: boolean;
   deletingProductId: number | null;
   error: string | null;
@@ -39,6 +41,7 @@ type FormMode = "create" | "edit";
 
 const initialState: ProductsSectionState = {
   loading: true,
+  categoriesLoading: true,
   saving: false,
   deletingProductId: null,
   error: null,
@@ -61,7 +64,6 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     maximumCurrentStock: "",
   });
   const [attributeFilterOptions, setAttributeFilterOptions] = useState<CategoryAttribute[]>([]);
-  const [debouncedSearch, setDebouncedSearch] = useState(filters.search);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [formMode, setFormMode] = useState<FormMode>("create");
@@ -74,16 +76,44 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupResult, setLookupResult] = useState<Product | null>(null);
   const requestIdRef = useRef(0);
+  const attributeOptionsCacheRef = useRef(new Map<string, CategoryAttribute[]>());
+  const debouncedFilterValues = useDebouncedValue(
+    useMemo(
+      () => ({
+        search: filters.search,
+        attributeValue: filters.attributeValue,
+        maximumMinimumStock: filters.maximumMinimumStock,
+        maximumCurrentStock: filters.maximumCurrentStock,
+      }),
+      [
+        filters.attributeValue,
+        filters.maximumCurrentStock,
+        filters.maximumMinimumStock,
+        filters.search,
+      ],
+    ),
+    250,
+  );
 
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      setDebouncedSearch(filters.search);
-    }, 250);
+  const loadCategories = useCallback(async () => {
+    try {
+      const categories = await api.get<Category[]>("/categories");
 
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [filters.search]);
+      setState((current) => ({
+        ...current,
+        categoriesLoading: false,
+        categories: safeArray(categories),
+      }));
+    } catch (error) {
+      const message = getErrorMessage(error, "No se pudieron cargar las categorias.");
+
+      setState((current) => ({
+        ...current,
+        categoriesLoading: false,
+        error: current.error ?? message,
+      }));
+    }
+  }, [api]);
 
   const loadProducts = useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -94,8 +124,8 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
         pageSize: String(pageSize),
       });
 
-      if (debouncedSearch.trim()) {
-        params.set("search", debouncedSearch.trim());
+      if (debouncedFilterValues.search.trim()) {
+        params.set("search", debouncedFilterValues.search.trim());
       }
 
       if (filters.categoryId) {
@@ -106,22 +136,19 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
         params.set("attributeKey", filters.attributeKey);
       }
 
-      if (filters.attributeValue) {
-        params.set("attributeValue", filters.attributeValue);
+      if (debouncedFilterValues.attributeValue) {
+        params.set("attributeValue", debouncedFilterValues.attributeValue);
       }
 
-      if (filters.maximumMinimumStock) {
-        params.set("maximumMinimumStock", filters.maximumMinimumStock);
+      if (debouncedFilterValues.maximumMinimumStock) {
+        params.set("maximumMinimumStock", debouncedFilterValues.maximumMinimumStock);
       }
 
-      if (filters.maximumCurrentStock) {
-        params.set("maximumCurrentStock", filters.maximumCurrentStock);
+      if (debouncedFilterValues.maximumCurrentStock) {
+        params.set("maximumCurrentStock", debouncedFilterValues.maximumCurrentStock);
       }
 
-      const [categories, products] = await Promise.all([
-        api.get<Category[]>("/categories"),
-        api.get<ProductListResponse>(`/products?${params.toString()}`),
-      ]);
+      const products = await api.get<ProductListResponse>(`/products?${params.toString()}`);
 
       if (requestId !== requestIdRef.current) {
         return;
@@ -139,7 +166,6 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
         ...current,
         loading: false,
         error: null,
-        categories: safeArray(categories),
         products: safeArray(products.items),
         total: normalizedTotal,
       }));
@@ -158,15 +184,16 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     }
   }, [
     api,
-    debouncedSearch,
+    debouncedFilterValues,
     filters.categoryId,
     filters.attributeKey,
-    filters.attributeValue,
-    filters.maximumCurrentStock,
-    filters.maximumMinimumStock,
     page,
     pageSize,
   ]);
+
+  useEffect(() => {
+    void loadCategories();
+  }, [loadCategories]);
 
   useEffect(() => {
     void loadProducts();
@@ -175,6 +202,13 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
   useEffect(() => {
     if (!filters.categoryId) {
       setAttributeFilterOptions([]);
+      return;
+    }
+
+    const cachedAttributes = attributeOptionsCacheRef.current.get(filters.categoryId);
+
+    if (cachedAttributes) {
+      setAttributeFilterOptions(cachedAttributes);
       return;
     }
 
@@ -190,7 +224,9 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
           return;
         }
 
-        setAttributeFilterOptions(attributes.filter((attribute) => attribute.active));
+        const nextOptions = attributes.filter((attribute) => attribute.active);
+        attributeOptionsCacheRef.current.set(filters.categoryId, nextOptions);
+        setAttributeFilterOptions(nextOptions);
       } catch {
         if (active) {
           setAttributeFilterOptions([]);
@@ -207,27 +243,27 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
 
   const canManage = currentUser?.role === "admin" || currentUser?.role === "manager";
   const canDelete = currentUser?.role === "admin";
-  const totalPages = Math.ceil(state.total / pageSize);
+  const totalPages = useMemo(() => Math.ceil(state.total / pageSize), [pageSize, state.total]);
 
-  const handleOpenCreate = () => {
+  const handleOpenCreate = useCallback(() => {
     setFormMode("create");
     setEditingProduct(null);
     setShowForm(true);
-  };
+  }, []);
 
-  const handleOpenEdit = (product: Product) => {
+  const handleOpenEdit = useCallback((product: Product) => {
     setFormMode("edit");
     setEditingProduct(product);
     setShowForm(true);
-  };
+  }, []);
 
-  const handleCloseForm = () => {
+  const handleCloseForm = useCallback(() => {
     setShowForm(false);
     setEditingProduct(null);
     setFormMode("create");
-  };
+  }, []);
 
-  const handleSubmit = async (payload: ProductInput) => {
+  const handleSubmit = useCallback(async (payload: ProductInput) => {
     if (state.saving) {
       return;
     }
@@ -271,13 +307,13 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     }
 
     setState((current) => ({ ...current, saving: false }));
-  };
+  }, [api, editingProduct, formMode, handleCloseForm, loadProducts, notify, state.saving]);
 
-  const handleDelete = async (product: Product) => {
+  const handleDelete = useCallback(async (product: Product) => {
     setPendingDeleteProduct(product);
-  };
+  }, []);
 
-  const handleConfirmDelete = async () => {
+  const handleConfirmDelete = useCallback(async () => {
     if (!pendingDeleteProduct || state.deletingProductId !== null) {
       return;
     }
@@ -318,9 +354,9 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
       deletingProductId: null,
     }));
     setPendingDeleteProduct(null);
-  };
+  }, [api, loadProducts, notify, pendingDeleteProduct, state.deletingProductId]);
 
-  const handleFiltersChange = (nextFilters: typeof filters) => {
+  const handleFiltersChange = useCallback((nextFilters: typeof filters) => {
     setFilters((current) => {
       if (current.categoryId !== nextFilters.categoryId) {
         return {
@@ -340,9 +376,9 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
       return nextFilters;
     });
     setPage(1);
-  };
+  }, []);
 
-  const handleExport = async (format: ReportFormat) => {
+  const handleExport = useCallback(async (format: ReportFormat) => {
     if (exportingFormat) {
       return;
     }
@@ -375,9 +411,9 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     } finally {
       setExportingFormat(null);
     }
-  };
+  }, [api, exportingFormat, notify, state.total]);
 
-  const handleQuickLookup = async () => {
+  const handleQuickLookup = useCallback(async () => {
     if (lookupLoading) {
       return;
     }
@@ -416,9 +452,26 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     } finally {
       setLookupLoading(false);
     }
-  };
+  }, [api, lookupLoading, notify, quickLookup]);
 
-  if (state.loading) {
+  const handleQuickLookupSubmit = useCallback(() => {
+    void handleQuickLookup();
+  }, [handleQuickLookup]);
+
+  const handlePageSizeChange = useCallback((nextPageSize: number) => {
+    setPageSize(nextPageSize);
+    setPage(1);
+  }, []);
+
+  const handleExportExcel = useCallback(() => {
+    void handleExport("excel");
+  }, [handleExport]);
+
+  const handleExportPdf = useCallback(() => {
+    void handleExport("pdf");
+  }, [handleExport]);
+
+  if (state.loading || state.categoriesLoading) {
     return <SectionLoader label="Cargando productos..." />;
   }
 
@@ -448,7 +501,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
           lookupLoading={lookupLoading}
           onFiltersChange={handleFiltersChange}
           onQuickLookupChange={setQuickLookup}
-          onQuickLookupSubmit={() => void handleQuickLookup()}
+          onQuickLookupSubmit={handleQuickLookupSubmit}
           onCreate={handleOpenCreate}
           onViewDetails={setDetailProduct}
           onEdit={handleOpenEdit}
@@ -458,12 +511,9 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
           pageSize={pageSize}
           totalPages={totalPages}
           onPageChange={setPage}
-          onPageSizeChange={(nextPageSize) => {
-            setPageSize(nextPageSize);
-            setPage(1);
-          }}
-          onExportExcel={() => void handleExport("excel")}
-          onExportPdf={() => void handleExport("pdf")}
+          onPageSizeChange={handlePageSizeChange}
+          onExportExcel={handleExportExcel}
+          onExportPdf={handleExportPdf}
         />
 
         {showForm ? null : (
@@ -499,7 +549,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
                   <MotionButton
                     aria-label={`Ver detalle rapido de ${lookupResult.name}`}
                     onClick={() => setDetailProduct(lookupResult)}
-                    className="mt-3 min-h-[40px] rounded-xl border border-cyan-400/20 px-3.5 text-sm text-cyan-100 transition hover:bg-cyan-500/10"
+                    className="mt-3 min-h-[40px] rounded-xl border border-cyan-400/20 px-3.5 text-sm text-cyan-100 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none hover:bg-cyan-500/10"
                   >
                     Ver detalle
                   </MotionButton>

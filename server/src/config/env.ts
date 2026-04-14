@@ -46,11 +46,5 @@ export const env = {
     password: process.env.DEFAULT_ADMIN_PASSWORD ?? "admin123",
     role: "admin" as UserRole,
   },
-  database: {
-    host: process.env.DB_HOST ?? "localhost",
-    port: getNumber(process.env.DB_PORT, 5432),
-    name: process.env.DB_NAME ?? "warehouse_system",
-    user: process.env.DB_USER ?? "warehouse_user",
-    password: process.env.DB_PASSWORD ?? "warehouse_password",
-  },
+  sqliteDatabasePath: process.env.SQLITE_DB_PATH?.trim() || undefined,
 };

@@ -1,11 +1,12 @@
 import type { CreateStockTransferInput, StockTransfer, StockTransferFilters } from "../../../../shared/src";
 import { AppError } from "../../common/errors";
-import { query, withTransaction } from "../../config/db";
+import { query, transaction } from "../../lib/db";
 import {
   applyStockDelta,
   assertLocationBelongsToWarehouse,
   assertProductExists,
   assertWarehouseExists,
+  insertStockMovementForDelta,
 } from "../inventory/stock.service";
 
 type TransferRow = StockTransfer;
@@ -32,6 +33,8 @@ const transferSelect = `
     app_user.name AS "approvedByName",
     st.completed_by AS "completedBy",
     comp_user.name AS "completedByName",
+    st.manual_destination AS "manualDestination",
+    st.carrier_name AS "carrierName",
     st.notes,
     st.created_at AS "createdAt",
     st.updated_at AS "updatedAt"
@@ -114,9 +117,11 @@ export const createTransfer = async (input: CreateStockTransferInput, requestedB
         quantity,
         status,
         requested_by,
+        manual_destination,
+        carrier_name,
         notes
       )
-      VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9, $10)
       RETURNING id;
     `,
     [
@@ -127,6 +132,8 @@ export const createTransfer = async (input: CreateStockTransferInput, requestedB
       input.productId,
       input.quantity,
       requestedBy,
+      input.manualDestination ?? null,
+      input.carrierName ?? null,
       input.notes ?? null,
     ],
   );
@@ -163,8 +170,8 @@ export const approveTransfer = async (id: number, approvedBy: number) => {
 };
 
 export const completeTransfer = async (id: number, completedBy: number) => {
-  await withTransaction(async (client) => {
-    const transferResult = await client.query<{
+  transaction((client) => {
+    const transferResult = client.query<{
       id: number;
       fromWarehouseId: number;
       toWarehouseId: number;
@@ -201,21 +208,47 @@ export const completeTransfer = async (id: number, completedBy: number) => {
       throw new AppError(409, "Only approved transfers can be completed.");
     }
 
-    await applyStockDelta(client, {
+    const movementDate = new Date().toISOString();
+    const originReference = transfer.fromLocationId
+      ? `almacen ${transfer.fromWarehouseId} / ubicacion ${transfer.fromLocationId}`
+      : `almacen ${transfer.fromWarehouseId}`;
+    const destinationReference = transfer.toLocationId
+      ? `almacen ${transfer.toWarehouseId} / ubicacion ${transfer.toLocationId}`
+      : `almacen ${transfer.toWarehouseId}`;
+
+    applyStockDelta(client, {
       warehouseId: transfer.fromWarehouseId,
       warehouseLocationId: transfer.fromLocationId,
       productId: transfer.productId,
       delta: -transfer.quantity,
     });
+    insertStockMovementForDelta(client, {
+      warehouseId: transfer.fromWarehouseId,
+      warehouseLocationId: transfer.fromLocationId,
+      productId: transfer.productId,
+      delta: -transfer.quantity,
+      userId: completedBy,
+      movementDate,
+      observation: `Transferencia #${transfer.id} completada · Salida desde ${originReference} hacia ${destinationReference}`,
+    });
 
-    await applyStockDelta(client, {
+    applyStockDelta(client, {
       warehouseId: transfer.toWarehouseId,
       warehouseLocationId: transfer.toLocationId,
       productId: transfer.productId,
       delta: transfer.quantity,
     });
+    insertStockMovementForDelta(client, {
+      warehouseId: transfer.toWarehouseId,
+      warehouseLocationId: transfer.toLocationId,
+      productId: transfer.productId,
+      delta: transfer.quantity,
+      userId: completedBy,
+      movementDate,
+      observation: `Transferencia #${transfer.id} completada · Entrada desde ${originReference} hacia ${destinationReference}`,
+    });
 
-    await client.query(
+    client.query(
       `
         UPDATE stock_transfers
         SET
@@ -226,7 +259,7 @@ export const completeTransfer = async (id: number, completedBy: number) => {
       `,
       [id, completedBy],
     );
-  });
+  }).immediate();
 
   return getTransferById(id);
 };

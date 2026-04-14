@@ -1,4 +1,3 @@
-import { motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   WAREHOUSE_LOCATION_TYPES,
@@ -274,13 +273,10 @@ export default function LocationsSection({ apiBaseUrl }: LocationsSectionProps) 
                   </div>
                 )}
 
-                {locations.map((location, index) => (
-                  <motion.article
+                {locations.map((location) => (
+                  <article
                     key={location.id}
                     className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"
-                    initial={{ opacity: 0, y: 16 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.2, delay: index * 0.03 }}
                   >
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                       <div>
@@ -327,7 +323,7 @@ export default function LocationsSection({ apiBaseUrl }: LocationsSectionProps) 
                         )}
                       </div>
                     </div>
-                  </motion.article>
+                  </article>
                 ))}
               </div>
             </article>

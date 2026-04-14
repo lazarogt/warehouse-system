@@ -1,4 +1,3 @@
-import { motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   STOCK_MOVEMENT_TYPES,
@@ -374,19 +373,14 @@ export default function InventorySection({
       )}
 
       {mode === "movements" && (
-        <motion.section
-          className="rounded-[28px] border border-white/10 bg-gradient-to-br from-amber-400/15 to-orange-500/10 p-6 shadow-panel"
-          initial={{ opacity: 0, y: 22 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.24, ease: "easeOut" }}
-        >
+        <section className="rounded-[28px] border border-white/10 bg-gradient-to-br from-amber-400/15 to-orange-500/10 p-6 shadow-panel">
           <p className="text-xs uppercase tracking-[0.25em] text-amber-100">Trazabilidad</p>
           <h2 className="mt-2 text-3xl font-semibold text-white">Historial de movimientos</h2>
           <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-200">
             Vista operativa para revisar entradas y salidas recientes con usuario responsable,
             cantidad, almacen y fecha del movimiento.
           </p>
-        </motion.section>
+        </section>
       )}
 
       <div className="grid gap-6 xl:grid-cols-[0.95fr,1.05fr]">
@@ -705,13 +699,10 @@ export default function InventorySection({
                 </div>
               )}
 
-              {lowStockItems.map((item, index) => (
-                <motion.article
+              {lowStockItems.map((item) => (
+                <article
                   key={item.id}
                   className="rounded-2xl border border-white/10 bg-slate-950/40 p-4"
-                  initial={{ opacity: 0, y: 14 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.2, delay: index * 0.03 }}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>
@@ -727,7 +718,7 @@ export default function InventorySection({
                       {safeInteger(item.currentStock)}
                     </span>
                   </div>
-                </motion.article>
+                </article>
               ))}
             </div>
           </article>
@@ -745,18 +736,14 @@ export default function InventorySection({
                   No hay niveles de stock disponibles para mostrar en este momento.
                 </div>
               ) : (
-                state.stock.slice(0, 6).map((item, index) => (
-                  <motion.div
+                state.stock.slice(0, 6).map((item) => (
+                  <div
                     key={`${item.productId}-${item.warehouseId}`}
                     className={`flex items-center justify-between gap-4 rounded-2xl border px-4 py-4 ${
                       criticalProductIds.has(item.productId)
                         ? "border-rose-400/20 bg-rose-500/10"
                         : "border-white/10 bg-white/5"
                     }`}
-                    initial={{ opacity: 0, y: 14 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.2, delay: index * 0.03 }}
-                    whileHover={{ scale: 1.01, backgroundColor: "rgba(255,255,255,0.05)" }}
                   >
                     <div>
                       <p className="truncate text-sm font-semibold text-white">
@@ -768,7 +755,7 @@ export default function InventorySection({
                       </p>
                     </div>
                     <span className="text-lg font-semibold text-white">{safeInteger(item.quantity)}</span>
-                  </motion.div>
+                  </div>
                 ))
               )}
             </div>
@@ -804,13 +791,10 @@ export default function InventorySection({
                 </tr>
               )}
 
-              {state.movements.map((movement, index) => (
-                <motion.tr
+              {state.movements.map((movement) => (
+                <tr
                   key={movement.id}
                   className="border-t border-white/10 align-top hover:bg-white/[0.035]"
-                  initial={{ opacity: 0, y: 16 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.22, delay: index * 0.03, ease: "easeOut" }}
                 >
                   <td className="px-5 py-5">
                     <div>
@@ -841,7 +825,7 @@ export default function InventorySection({
                   <td className="px-5 py-5 text-sm text-slate-200">{safeInteger(movement.quantity)}</td>
                   <td className="px-5 py-5 text-sm text-slate-300">{safeText(movement.userName, "Usuario no disponible")}</td>
                   <td className="px-5 py-5 text-sm text-slate-300">{safeDateTime(movement.movementDate)}</td>
-                </motion.tr>
+                </tr>
               ))}
             </tbody>
           </table>

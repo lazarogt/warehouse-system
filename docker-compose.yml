@@ -23,12 +23,8 @@ services:
       NODE_ENV: development
       SERVER_PORT: ${SERVER_PORT}
       CORS_ORIGIN: ${CORS_ORIGIN}
+      SQLITE_DB_PATH: /data/database.db
       JWT_SECRET: ${JWT_SECRET:-warehouse-system-dev-secret}
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB}
-      DB_USER: ${POSTGRES_USER}
-      DB_PASSWORD: ${POSTGRES_PASSWORD}
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME}
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS}
       SESSION_COOKIE_SAME_SITE: ${SESSION_COOKIE_SAME_SITE:-lax}
@@ -40,27 +36,8 @@ services:
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD}
     ports:
       - "${SERVER_PORT}:3000"
-    depends_on:
-      db:
-        condition: service_healthy
-
-  db:
-    image: postgres:14-alpine
-    container_name: warehouse-system-db
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "${POSTGRES_PORT}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      - sqlite_data:/data
 
 volumes:
-  postgres_data:
+  sqlite_data:

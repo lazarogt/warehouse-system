@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { APP_NAME, APP_VERSION, type HealthResponse } from "../../../shared/src";
-import { checkDatabaseConnection } from "../config/db";
+import { checkDatabaseConnection } from "../lib/db";
 
 const router = Router();
 
@@ -37,4 +37,3 @@ router.get("/", async (_request, response) => {
 });
 
 export default router;
-

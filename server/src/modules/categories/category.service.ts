@@ -1,6 +1,6 @@
 import type { Category, CategoryInput } from "../../../../shared/src";
 import { AppError } from "../../common/errors";
-import { query } from "../../config/db";
+import { query } from "../../lib/db";
 
 type CategoryRow = Category;
 

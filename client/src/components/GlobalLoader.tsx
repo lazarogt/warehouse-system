@@ -20,7 +20,7 @@ export default function GlobalLoader({
           subtle ? "bg-slate-950/55" : "bg-slate-950/80"
         }`}
       >
-        <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/15 border-t-cyan-300" />
+        <div className="h-10 w-10 rounded-full border-2 border-white/15 border-t-cyan-300 motion-safe:animate-spin motion-reduce:animate-none" />
         <div>
           <p className="text-sm font-semibold text-white">Procesando</p>
           <p className="mt-1 text-sm text-slate-300">{label}</p>

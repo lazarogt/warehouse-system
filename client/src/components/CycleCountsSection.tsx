@@ -1,4 +1,3 @@
-import { motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   CreateCycleCountInput,
@@ -444,13 +443,10 @@ export default function CycleCountsSection({ apiBaseUrl }: CycleCountsSectionPro
                   </div>
                 )}
 
-                {selectedCount.items.map((item, index) => (
-                  <motion.article
+                {selectedCount.items.map((item) => (
+                  <article
                     key={item.id}
                     className="rounded-2xl border border-white/10 bg-white/5 p-4"
-                    initial={{ opacity: 0, y: 14 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.22, delay: index * 0.03 }}
                   >
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                       <div>
@@ -485,7 +481,7 @@ export default function CycleCountsSection({ apiBaseUrl }: CycleCountsSectionPro
                         </span>
                       )}
                     </div>
-                  </motion.article>
+                  </article>
                 ))}
               </div>
 

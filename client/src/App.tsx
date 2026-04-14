@@ -1,4 +1,3 @@
-import { AnimatePresence, motion } from "framer-motion";
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { APP_NAME, APP_VERSION, type LowStockAlert } from "../../shared/src";
 import { useAuth } from "./auth/AuthProvider";
@@ -16,6 +15,7 @@ const MovementsSection = lazy(() => import("./components/MovementsSection"));
 const ConfigurationSection = lazy(() => import("./components/ConfigurationSection"));
 const LocationsSection = lazy(() => import("./components/LocationsSection"));
 const TransfersSection = lazy(() => import("./components/TransfersSection"));
+const DispatchSection = lazy(() => import("./components/DispatchSection"));
 const AdjustmentsSection = lazy(() => import("./components/AdjustmentsSection"));
 const CycleCountsSection = lazy(() => import("./components/CycleCountsSection"));
 
@@ -27,6 +27,7 @@ type SectionId =
   | "movimientos"
   | "ubicaciones"
   | "transferencias"
+  | "despacho"
   | "ajustes"
   | "conteos"
   | "configuracion";
@@ -74,6 +75,11 @@ const sections: Section[] = [
     description: "Traslado interno o entre almacenes con estados y trazabilidad.",
   },
   {
+    id: "despacho",
+    label: "Despacho",
+    description: "Salidas operativas hacia destinos manuales con total y control de stock.",
+  },
+  {
     id: "ajustes",
     label: "Ajustes",
     description: "Correcciones manuales de inventario con motivo obligatorio.",
@@ -98,6 +104,7 @@ const sectionAccent: Record<SectionId, string> = {
   movimientos: "from-amber-400/20 to-orange-400/10",
   ubicaciones: "from-violet-400/20 to-fuchsia-500/10",
   transferencias: "from-emerald-400/20 to-lime-500/10",
+  despacho: "from-cyan-400/20 to-emerald-500/10",
   ajustes: "from-rose-400/20 to-orange-500/10",
   conteos: "from-sky-400/20 to-indigo-500/10",
   configuracion: "from-slate-300/20 to-zinc-400/10",
@@ -201,6 +208,10 @@ export default function App() {
       return <TransfersSection apiBaseUrl={apiBaseUrl} />;
     }
 
+    if (selectedSection.id === "despacho") {
+      return <DispatchSection apiBaseUrl={apiBaseUrl} />;
+    }
+
     if (selectedSection.id === "ajustes") {
       return <AdjustmentsSection apiBaseUrl={apiBaseUrl} />;
     }
@@ -255,23 +266,17 @@ export default function App() {
       <div className="min-h-screen bg-ink bg-grid text-white">
         <div className="min-h-screen bg-[linear-gradient(180deg,rgba(8,17,31,0.86),rgba(8,17,31,0.96))]">
           <div className="flex min-h-screen">
-          <AnimatePresence>
-            {sidebarOpen && (
-              <motion.div
-                className="fixed inset-0 z-30 bg-slate-950/60 backdrop-blur-sm lg:hidden"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setSidebarOpen(false)}
-              />
-            )}
-          </AnimatePresence>
+          {sidebarOpen && (
+            <div
+              className="fixed inset-0 z-30 bg-slate-950/60 backdrop-blur-sm lg:hidden"
+              onClick={() => setSidebarOpen(false)}
+            />
+          )}
 
-          <motion.aside
+          <aside
             className={`fixed inset-y-0 left-0 z-40 w-80 max-w-[86vw] border-r border-white/10 bg-slate-950/90 px-5 py-6 shadow-panel transition-transform duration-300 lg:static lg:w-72 lg:translate-x-0 lg:bg-slate-950/70 ${
               sidebarOpen ? "translate-x-0" : "-translate-x-full"
             }`}
-            initial={false}
           >
             <div className="flex items-center justify-between lg:block">
               <div>
@@ -298,7 +303,7 @@ export default function App() {
                 const isActive = section.id === activeSection;
 
                 return (
-                  <motion.button
+                  <button
                     key={section.id}
                     type="button"
                     aria-current={isActive ? "page" : undefined}
@@ -307,21 +312,14 @@ export default function App() {
                       setActiveSection(section.id);
                       setSidebarOpen(false);
                     }}
-                    layout
-                    whileHover={{ scale: 1.01 }}
-                    whileTap={{ scale: 0.99 }}
-                    className={`relative flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left transition ${
+                    className={`ui-button relative flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left ${
                       isActive
                         ? "text-ink shadow-lg"
                         : "bg-white/0 text-slate-300 hover:bg-white/5 hover:text-white"
                     }`}
                   >
                     {isActive && (
-                      <motion.span
-                        layoutId="active-section-pill"
-                        className="absolute inset-0 rounded-2xl bg-white"
-                        transition={{ type: "spring", stiffness: 360, damping: 28 }}
-                      />
+                      <span className="absolute inset-0 rounded-2xl bg-white" />
                     )}
                     <span className="relative z-10 font-medium">{section.label}</span>
                     <div className="relative z-10 flex items-center gap-2">
@@ -336,7 +334,7 @@ export default function App() {
                         }`}
                       />
                     </div>
-                  </motion.button>
+                  </button>
                 );
               })}
             </nav>
@@ -348,7 +346,7 @@ export default function App() {
                 Base visual del dashboard preparada para crecer por modulos.
               </p>
             </div>
-          </motion.aside>
+          </aside>
 
           <div className="flex min-h-screen flex-1 flex-col lg:pl-0">
             <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/65 px-4 py-4 backdrop-blur xl:px-8">
@@ -414,17 +412,7 @@ export default function App() {
 
             <main className="flex-1 px-4 py-6 xl:px-8 xl:py-8">
               <Suspense fallback={<SectionLoader />}>
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={selectedSection.id}
-                    initial={{ opacity: 0, y: 16 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.2, ease: "easeOut" }}
-                  >
-                    {renderMainContent()}
-                  </motion.div>
-                </AnimatePresence>
+                <div key={selectedSection.id}>{renderMainContent()}</div>
               </Suspense>
             </main>
           </div>

@@ -55,19 +55,31 @@ export const errorHandler = (
   }
 
   if (isDatabaseError(error)) {
-    if (error.code === "23505") {
+    if (
+      error.code === "23505" ||
+      error.code === "SQLITE_CONSTRAINT_UNIQUE"
+    ) {
       logError(409, "A record with that unique value already exists.", { code: error.code });
       sendErrorResponse(response, 409, "A record with that unique value already exists.");
       return;
     }
 
-    if (error.code === "23503") {
+    if (
+      error.code === "23503" ||
+      error.code === "SQLITE_CONSTRAINT_FOREIGNKEY"
+    ) {
       logError(409, "Operation cannot be completed because related records exist.", { code: error.code });
       sendErrorResponse(response, 409, "Operation cannot be completed because related records exist.");
       return;
     }
 
-    if (error.code === "22P02" || error.code === "23514") {
+    if (
+      error.code === "22P02" ||
+      error.code === "23514" ||
+      error.code === "SQLITE_CONSTRAINT_CHECK" ||
+      error.code === "SQLITE_CONSTRAINT_NOTNULL" ||
+      error.code === "SQLITE_CONSTRAINT_PRIMARYKEY"
+    ) {
       logError(400, "Invalid data provided.", { code: error.code });
       sendErrorResponse(response, 400, "Invalid data provided.");
       return;

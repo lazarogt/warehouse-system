@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import type { Category, CategoryAttribute, Product } from "../../../shared/src";
 import ActionGroup from "./ActionGroup";
 import {
@@ -58,6 +58,36 @@ type ProductRowProps = {
   onDelete: (product: Product) => void;
 };
 
+type TableActionButtonProps = {
+  children: ReactNode;
+  ariaLabel: string;
+  onClick: () => void;
+  disabled?: boolean;
+  className: string;
+};
+
+const pageSizeOptions = [5, 10, 20, 50] as const;
+
+const TableActionButton = memo(function TableActionButton({
+  children,
+  ariaLabel,
+  onClick,
+  disabled = false,
+  className,
+}: TableActionButtonProps) {
+  return (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onClick={onClick}
+      className={className}
+    >
+      {children}
+    </button>
+  );
+});
+
 const stockToneClasses = {
   critical: {
     badge: "bg-rose-500/15 text-rose-100",
@@ -97,7 +127,7 @@ const ProductRow = memo(function ProductRow({
   const toneClasses = stockToneClasses[tone];
 
   return (
-    <tr className="border-t border-white/10 align-top transition-colors duration-150 hover:bg-white/[0.035]">
+    <tr className="border-t border-white/10 align-top motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none hover:bg-white/[0.035]">
       <td className="px-5 py-5">
         <div className="min-w-0 space-y-1.5">
           <p className="truncate text-sm font-semibold text-white" title={safeTitle(product.name, name)}>
@@ -139,7 +169,7 @@ const ProductRow = memo(function ProductRow({
           </span>
           <div className={`h-1.5 w-full overflow-hidden rounded-full ${toneClasses.track}`} aria-hidden="true">
             <div
-              className={`h-full rounded-full ${toneClasses.fill} transition-[width] duration-150 ease-out`}
+              className={`h-full rounded-full ${toneClasses.fill}`}
               style={{ width: `${stockProgress}%` }}
             />
           </div>
@@ -150,33 +180,33 @@ const ProductRow = memo(function ProductRow({
       </td>
       <td className="w-40 px-5 py-5 text-right">
         <div className="flex flex-col items-end gap-2 flex-none">
-          <MotionButton
-            aria-label={`Ver detalle del producto ${name}`}
+          <TableActionButton
+            ariaLabel={`Ver detalle del producto ${name}`}
             onClick={() => onViewDetails(product)}
-            className="min-h-[40px] w-32 rounded-xl border border-cyan-400/20 px-3.5 text-sm text-cyan-100 transition-all duration-150 hover:bg-cyan-500/10"
+            className="min-h-[40px] w-32 rounded-xl border border-cyan-400/20 px-3.5 text-sm text-cyan-100 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none hover:bg-cyan-500/10"
           >
             Detalle
-          </MotionButton>
+          </TableActionButton>
 
           {canManage && (
-            <MotionButton
-              aria-label={`Editar producto ${name}`}
+            <TableActionButton
+              ariaLabel={`Editar producto ${name}`}
               onClick={() => onEdit(product)}
-              className="min-h-[40px] w-32 rounded-xl border border-white/10 px-3.5 text-sm text-slate-200 transition-all duration-150 hover:bg-white/5 hover:text-white"
+              className="min-h-[40px] w-32 rounded-xl border border-white/10 px-3.5 text-sm text-slate-200 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none hover:bg-white/5 hover:text-white"
             >
               Editar
-            </MotionButton>
+            </TableActionButton>
           )}
 
           {canDelete && (
-            <MotionButton
-              aria-label={`Eliminar producto ${name}`}
+            <TableActionButton
+              ariaLabel={`Eliminar producto ${name}`}
               disabled={isDeleting}
               onClick={() => onDelete(product)}
-              className="min-h-[40px] w-32 rounded-xl border border-rose-400/20 px-3.5 text-sm text-rose-200 transition-all duration-150 hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-[40px] w-32 rounded-xl border border-rose-400/20 px-3.5 text-sm text-rose-200 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isDeleting ? "Eliminando..." : "Borrar"}
-            </MotionButton>
+            </TableActionButton>
           )}
         </div>
       </td>
@@ -211,6 +241,43 @@ function ProductList({
   onExportExcel,
   onExportPdf,
 }: ProductListProps) {
+  const categoryOptions = useMemo(
+    () =>
+      categories.map((category) => (
+        <option key={category.id} value={category.id} className="bg-slate-900">
+          {category.name}
+        </option>
+      )),
+    [categories],
+  );
+
+  const attributeOptionNodes = useMemo(
+    () =>
+      attributeOptions.map((attribute) => (
+        <option key={attribute.id} value={attribute.key} className="bg-slate-900">
+          {attribute.label}
+        </option>
+      )),
+    [attributeOptions],
+  );
+
+  const productRows = useMemo(
+    () =>
+      products.map((product) => (
+        <ProductRow
+          key={product.id}
+          product={product}
+          canManage={canManage}
+          canDelete={canDelete}
+          isDeleting={deletingProductId === product.id}
+          onViewDetails={onViewDetails}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
+      )),
+    [canDelete, canManage, deletingProductId, onDelete, onEdit, onViewDetails, products],
+  );
+
   return (
     <section className="panel-surface">
       <div className="flex flex-col gap-5 border-b border-white/10 pb-5">
@@ -257,11 +324,7 @@ function ProductList({
                 <option value="" className="bg-slate-900">
                   Todas las categorias
                 </option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id} className="bg-slate-900">
-                    {category.name}
-                  </option>
-                ))}
+                {categoryOptions}
               </select>
             </label>
 
@@ -283,11 +346,7 @@ function ProductList({
                 <option value="" className="bg-slate-900">
                   {attributeOptions.length === 0 ? "Sin atributos filtrables" : "Selecciona atributo"}
                 </option>
-                {attributeOptions.map((attribute) => (
-                  <option key={attribute.id} value={attribute.key} className="bg-slate-900">
-                    {attribute.label}
-                  </option>
-                ))}
+                {attributeOptionNodes}
               </select>
             </label>
 
@@ -368,7 +427,7 @@ function ProductList({
                 <MotionButton
                   aria-label="Buscar producto por SKU o barcode"
                   onClick={onQuickLookupSubmit}
-                  className="min-h-[48px] rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20"
+                  className="min-h-[48px] rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-100 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none hover:bg-cyan-500/20"
                 >
                   {lookupLoading ? "Buscando..." : "Lookup"}
                 </MotionButton>
@@ -383,14 +442,14 @@ function ProductList({
                 <MotionButton
                   aria-label="Exportar productos en Excel"
                   onClick={onExportExcel}
-                  className="min-h-[44px] rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 text-sm font-medium text-cyan-100 transition hover:bg-cyan-500/20"
+                  className="min-h-[44px] rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 text-sm font-medium text-cyan-100 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none hover:bg-cyan-500/20"
                 >
                   Exportar Excel
                 </MotionButton>
                 <MotionButton
                   aria-label="Exportar productos en PDF"
                   onClick={onExportPdf}
-                  className="min-h-[44px] rounded-2xl border border-orange-400/20 bg-orange-500/10 px-4 text-sm font-medium text-orange-100 transition hover:bg-orange-500/20"
+                  className="min-h-[44px] rounded-2xl border border-orange-400/20 bg-orange-500/10 px-4 text-sm font-medium text-orange-100 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none hover:bg-orange-500/20"
                 >
                   Exportar PDF
                 </MotionButton>
@@ -398,7 +457,7 @@ function ProductList({
                   <MotionButton
                     aria-label="Crear nuevo producto"
                     onClick={onCreate}
-                    className="min-h-[44px] rounded-2xl bg-orange-500 px-5 text-sm font-semibold text-white transition hover:bg-orange-400"
+                    className="min-h-[44px] rounded-2xl bg-orange-500 px-5 text-sm font-semibold text-white motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none hover:bg-orange-400"
                   >
                     Nuevo producto
                   </MotionButton>
@@ -414,9 +473,9 @@ function ProductList({
                   aria-label="Cantidad de productos por pagina"
                   value={pageSize}
                   onChange={(event) => onPageSizeChange(Number(event.target.value))}
-                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition focus:border-cyan-300"
+                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none focus:border-cyan-300"
                 >
-                  {[5, 10, 20, 50].map((value) => (
+                  {pageSizeOptions.map((value) => (
                     <option key={value} value={value} className="bg-slate-900">
                       {value}
                     </option>
@@ -473,19 +532,7 @@ function ProductList({
               </tr>
             )}
 
-            {!loading &&
-              products.map((product) => (
-                <ProductRow
-                  key={product.id}
-                  product={product}
-                  canManage={canManage}
-                  canDelete={canDelete}
-                  isDeleting={deletingProductId === product.id}
-                  onViewDetails={onViewDetails}
-                  onEdit={onEdit}
-                  onDelete={onDelete}
-                />
-              ))}
+            {!loading && productRows}
           </tbody>
         </table>
       </div>
@@ -500,7 +547,7 @@ function ProductList({
             aria-label="Pagina anterior de productos"
             disabled={page <= 1}
             onClick={() => onPageChange(page - 1)}
-            className="min-h-[40px] rounded-xl border border-white/10 px-4 text-sm text-slate-200 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-h-[40px] rounded-xl border border-white/10 px-4 text-sm text-slate-200 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Anterior
           </MotionButton>
@@ -508,7 +555,7 @@ function ProductList({
             aria-label="Pagina siguiente de productos"
             disabled={totalPages === 0 || page >= totalPages}
             onClick={() => onPageChange(page + 1)}
-            className="min-h-[40px] rounded-xl border border-white/10 px-4 text-sm text-slate-200 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-h-[40px] rounded-xl border border-white/10 px-4 text-sm text-slate-200 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Siguiente
           </MotionButton>

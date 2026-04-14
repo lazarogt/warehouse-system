@@ -131,6 +131,8 @@ CREATE TABLE IF NOT EXISTS stock_transfers (
   requested_by BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   approved_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
   completed_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  manual_destination TEXT,
+  carrier_name TEXT,
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -147,6 +149,24 @@ CREATE TABLE IF NOT EXISTS stock_adjustments (
   reason TEXT NOT NULL,
   created_by BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS dispatches (
+  id BIGSERIAL PRIMARY KEY,
+  manual_destination TEXT NOT NULL,
+  carrier_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  notes TEXT,
+  total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (total_amount >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS dispatch_items (
+  id BIGSERIAL PRIMARY KEY,
+  dispatch_id BIGINT NOT NULL REFERENCES dispatches(id) ON DELETE CASCADE,
+  product_id BIGINT NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+  quantity INTEGER NOT NULL CHECK (quantity > 0),
+  unit_price NUMERIC(12, 2) NOT NULL CHECK (unit_price >= 0),
+  line_total NUMERIC(12, 2) NOT NULL CHECK (line_total >= 0)
 );
 
 CREATE TABLE IF NOT EXISTS cycle_counts (
@@ -262,6 +282,12 @@ CREATE INDEX IF NOT EXISTS idx_stock_adjustments_warehouse_id
 
 CREATE INDEX IF NOT EXISTS idx_stock_adjustments_location_id
   ON stock_adjustments(warehouse_location_id);
+
+CREATE INDEX IF NOT EXISTS idx_dispatch_items_dispatch_id
+  ON dispatch_items(dispatch_id);
+
+CREATE INDEX IF NOT EXISTS idx_dispatch_items_product_id
+  ON dispatch_items(product_id);
 
 CREATE INDEX IF NOT EXISTS idx_cycle_counts_warehouse_id
   ON cycle_counts(warehouse_id);

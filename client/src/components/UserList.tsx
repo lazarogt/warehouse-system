@@ -1,4 +1,3 @@
-import { motion } from "framer-motion";
 import { memo } from "react";
 import type { User } from "../../../shared/src";
 import { safeText } from "../lib/format";
@@ -91,17 +90,14 @@ function UserList({
             )}
 
             {!loading &&
-              users.map((user, index) => {
+              users.map((user) => {
                 const isCurrentUser = currentUserId === user.id;
                 const isDeleting = deletingUserId === user.id;
 
                 return (
-                  <motion.tr
+                  <tr
                     key={user.id}
                     className="border-t border-white/10 align-top hover:bg-white/[0.035]"
-                    initial={{ opacity: 0, y: 16 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.22, delay: index * 0.03, ease: "easeOut" }}
                   >
                     <td className="px-5 py-5">
                       <div>
@@ -165,7 +161,7 @@ function UserList({
                         )}
                       </div>
                     </td>
-                  </motion.tr>
+                  </tr>
                 );
               })}
           </tbody>

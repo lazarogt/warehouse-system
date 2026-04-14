@@ -1,5 +1,5 @@
-import type { PoolClient } from "pg";
-import { query, withTransaction } from "../config/db";
+import type { DatabaseClient } from "../lib/db";
+import { query, withTransaction } from "../lib/db";
 import { env } from "../config/env";
 import { ensureDefaultAdminUser } from "../modules/users/user.service";
 
@@ -178,7 +178,7 @@ const getDatabaseCounts = async () => {
   return result.rows[0];
 };
 
-const getAdminUserId = async (client?: PoolClient) => {
+const getAdminUserId = async (client?: DatabaseClient) => {
   const sql = "SELECT id FROM users WHERE username = $1 OR email = $2 ORDER BY id LIMIT 1;";
   const result = client
     ? await client.query<{ id: number }>(sql, [env.defaultAdmin.username, env.defaultAdmin.email])
@@ -191,7 +191,7 @@ const getAdminUserId = async (client?: PoolClient) => {
   return result.rows[0].id;
 };
 
-const ensureWarehouse = async (client: PoolClient) => {
+const ensureWarehouse = async (client: DatabaseClient) => {
   const existingWarehouse = await client.query<{ id: number }>(
     "SELECT id FROM warehouses WHERE name = $1 LIMIT 1;",
     [SEED_WAREHOUSE_NAME],
@@ -220,7 +220,7 @@ const ensureWarehouse = async (client: PoolClient) => {
 };
 
 const ensureCategory = async (
-  client: PoolClient,
+  client: DatabaseClient,
   category: (typeof seedCategories)[number],
 ) => {
   const existingCategory = await client.query<{ id: number }>(
@@ -262,7 +262,7 @@ const ensureCategory = async (
 };
 
 const ensureCategoryAttribute = async (
-  client: PoolClient,
+  client: DatabaseClient,
   categoryId: number,
   attribute: SeedCategoryAttribute,
 ) => {
@@ -342,7 +342,7 @@ const ensureCategoryAttribute = async (
 };
 
 const ensureProduct = async (
-  client: PoolClient,
+  client: DatabaseClient,
   product: SeedProduct,
   categoryId: number,
 ) => {
