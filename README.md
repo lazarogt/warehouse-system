@@ -128,6 +128,15 @@ Frontend: http://localhost:5173
 Backend: http://localhost:3000
 Health: /api/health
 DB: SQLite local o Docker volume
+🖥️ Desktop App (Electron)
+El módulo `desktop` agrega un shell nativo sobre el frontend React existente, sin modificar la lógica del backend.
+Scripts disponibles desde la raíz del repositorio:
+`npm run dev:desktop`: levanta Vite en `http://localhost:5173`, compila Electron en watch y abre la ventana desktop
+`npm run build:desktop`: genera el build de React y compila Electron
+`npm run start:desktop`: ejecuta Electron en modo producción cargando `client/dist`
+Instalación requerida:
+`npm install` en la raíz para `concurrently`
+`npm install` dentro de `desktop`
 👨‍💻 Autor
 
 Lázaro González Torres
