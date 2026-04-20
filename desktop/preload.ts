@@ -8,7 +8,9 @@ import type {
   StockMovement,
   UpdateProductStockPayload,
 } from "../shared/src/types/desktop-warehouse-ipc";
+import type { WarehouseSyncResult } from "../shared/src/types/desktop-warehouse-sync-ipc";
 import { WAREHOUSE_IPC_CHANNELS } from "./src/shared/warehouse-ipc-channels";
+import { WAREHOUSE_SYNC_IPC_CHANNELS } from "./src/shared/warehouse-sync-ipc-channels";
 
 const warehouseApi = {
   getProducts(): Promise<ApiResponse<Product[]>> {
@@ -27,6 +29,9 @@ const warehouseApi = {
     payload: CreateStockMovementPayload,
   ): Promise<ApiResponse<StockMovement>> {
     return ipcRenderer.invoke(WAREHOUSE_IPC_CHANNELS.createStockMovement, payload);
+  },
+  sync(): Promise<ApiResponse<WarehouseSyncResult>> {
+    return ipcRenderer.invoke(WAREHOUSE_SYNC_IPC_CHANNELS.sync);
   },
 };
 

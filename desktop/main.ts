@@ -7,6 +7,12 @@ import {
   type DesktopDatabaseRuntime,
 } from "./src/main/db/init";
 import { registerWarehouseIpcHandlers } from "./src/main/ipc/warehouse-ipc";
+import { registerWarehouseSyncIpcHandlers } from "./src/main/ipc/warehouse-sync-ipc";
+import {
+  createSyncAwareWarehouseDataService,
+  createWarehouseSyncService,
+  type WarehouseSyncService,
+} from "./src/main/sync/sync-service";
 
 const APP_PROTOCOL = "app";
 const DEV_SERVER_URL = process.env.ELECTRON_RENDERER_URL;
@@ -15,6 +21,7 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 let mainWindow: BrowserWindow | null = null;
 let desktopDatabaseRuntime: DesktopDatabaseRuntime | null = null;
+let warehouseSyncService: WarehouseSyncService | null = null;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -166,9 +173,21 @@ if (!hasSingleInstanceLock) {
       protocol.handle(APP_PROTOCOL, handleAppProtocol);
     }
 
-    registerWarehouseIpcHandlers({
-      warehouseDataService: desktopDatabaseRuntime.services.warehouseData,
+    warehouseSyncService = createWarehouseSyncService({
+      database: desktopDatabaseRuntime.database,
+      userDataPath: app.getPath("userData"),
     });
+
+    registerWarehouseIpcHandlers({
+      warehouseDataService: createSyncAwareWarehouseDataService(
+        desktopDatabaseRuntime.services.warehouseData,
+        warehouseSyncService,
+      ),
+    });
+    registerWarehouseSyncIpcHandlers({
+      syncService: warehouseSyncService,
+    });
+    warehouseSyncService.start();
 
     await createMainWindow();
 
@@ -186,6 +205,8 @@ if (!hasSingleInstanceLock) {
   });
 
   app.on("will-quit", () => {
+    warehouseSyncService?.stop();
+    warehouseSyncService = null;
     desktopDatabaseRuntime?.close();
     desktopDatabaseRuntime = null;
   });
