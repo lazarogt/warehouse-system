@@ -73,6 +73,7 @@ export type WarehouseDataService = {
   listStockMovements(productId?: number): StockMovementRecord[];
   listUsers(): UserRecord[];
   recordStockMovement(input: RecordStockMovementInput): StockMovementRecord;
+  updateProductStock(input: { productId: number; stock: number }): ProductRecord;
 };
 
 type CreateWarehouseDataServiceOptions = {
@@ -417,6 +418,37 @@ export function createWarehouseDataService(
         }
 
         return stockMovement;
+      }, "immediate");
+    },
+    updateProductStock(input) {
+      const productId = assertPositiveInteger("productId", input.productId);
+      const stock = assertNonNegativeInteger("stock", input.stock);
+
+      return database.transaction((transactionDatabase) => {
+        const product = transactionDatabase.get<ProductRecord>(SELECT_PRODUCT_BY_ID_SQL, [productId]);
+
+        if (!product) {
+          throw new DatabaseValidationError("productId does not reference an existing product.");
+        }
+
+        transactionDatabase.run(
+          `
+            UPDATE products
+            SET stock = ?
+            WHERE id = ?;
+          `,
+          [stock, productId],
+        );
+
+        const updatedProduct = transactionDatabase.get<ProductRecord>(SELECT_PRODUCT_BY_ID_SQL, [
+          productId,
+        ]);
+
+        if (!updatedProduct) {
+          throw new Error("Product could not be loaded after stock update.");
+        }
+
+        return updatedProduct;
       }, "immediate");
     },
   };

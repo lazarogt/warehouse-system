@@ -6,6 +6,7 @@ import {
   initializeDesktopDatabase,
   type DesktopDatabaseRuntime,
 } from "./src/main/db/init";
+import { registerWarehouseIpcHandlers } from "./src/main/ipc/warehouse-ipc";
 
 const APP_PROTOCOL = "app";
 const DEV_SERVER_URL = process.env.ELECTRON_RENDERER_URL;
@@ -164,6 +165,10 @@ if (!hasSingleInstanceLock) {
     if (!isDevelopment) {
       protocol.handle(APP_PROTOCOL, handleAppProtocol);
     }
+
+    registerWarehouseIpcHandlers({
+      warehouseDataService: desktopDatabaseRuntime.services.warehouseData,
+    });
 
     await createMainWindow();
 
