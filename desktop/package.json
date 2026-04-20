@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev:watch": "tsc -p tsconfig.json --watch --preserveWatchOutput",
-    "dev:electron": "wait-on tcp:5173 file:./dist/main.js file:./dist/preload.js && cross-env ELECTRON_RENDERER_URL=http://localhost:5173 nodemon --watch dist --ext js --exec \"electron .\"",
+    "dev:electron": "wait-on http-get://localhost:5173 file:./dist/main.js file:./dist/preload.js && cross-env ELECTRON_RENDERER_URL=http://localhost:5173 nodemon --signal SIGTERM --delay 250ms --watch dist/main.js --watch dist/preload.js --exec \"electron .\"",
     "start": "electron ."
   },
   "devDependencies": {

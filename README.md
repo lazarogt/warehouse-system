@@ -137,6 +137,12 @@ Scripts disponibles desde la raíz del repositorio:
 Instalación requerida:
 `npm install` en la raíz para `concurrently`
 `npm install` dentro de `desktop`
+Flujo de desarrollo:
+`dev:desktop` espera a que Vite responda antes de abrir Electron
+Electron corre en una sola instancia y reutiliza la ventana existente si se intenta abrir otra
+En desarrollo el renderer carga `http://localhost:5173`
+En producción Electron sirve el SPA desde `client/dist` usando fallback a `index.html` para rutas internas
+Esto evita pantallas en blanco al refrescar rutas del frontend dentro del shell desktop
 👨‍💻 Autor
 
 Lázaro González Torres

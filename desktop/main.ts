@@ -1,16 +1,33 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, net, protocol } from "electron";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
+const APP_PROTOCOL = "app";
 const DEV_SERVER_URL = process.env.ELECTRON_RENDERER_URL;
 const isDevelopment = typeof DEV_SERVER_URL === "string" && DEV_SERVER_URL.length > 0;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+let mainWindow: BrowserWindow | null = null;
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: APP_PROTOCOL,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+    },
+  },
+]);
 
 function getPreloadPath(): string {
   return path.join(__dirname, "preload.js");
 }
 
 function getProductionRendererPath(): string {
-  const rendererPath = path.resolve(__dirname, "../../client/dist/index.html");
+  const rendererPath = path.join(__dirname, "../../client/dist/index.html");
 
   if (!existsSync(rendererPath)) {
     throw new Error(
@@ -21,8 +38,74 @@ function getProductionRendererPath(): string {
   return rendererPath;
 }
 
-function createMainWindow(): BrowserWindow {
-  const mainWindow = new BrowserWindow({
+function getProductionDistPath(): string {
+  return path.dirname(getProductionRendererPath());
+}
+
+function getEnvironmentLabel(): "dev" | "prod" {
+  return isDevelopment ? "dev" : "prod";
+}
+
+function logEnvironment(rendererTarget: string): void {
+  console.info(`[desktop:${getEnvironmentLabel()}] renderer target: ${rendererTarget}`);
+}
+
+function getProductionAppUrl(route = "/"): string {
+  const normalizedRoute = route.replace(/^\/+/, "");
+
+  return normalizedRoute.length > 0
+    ? `${APP_PROTOCOL}://-/${normalizedRoute}`
+    : `${APP_PROTOCOL}://-/`;
+}
+
+function resolveAssetPath(requestUrl: string): string {
+  const url = new URL(requestUrl);
+  const requestPath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+  const normalizedPath = requestPath.length > 0 ? requestPath : "index.html";
+  const distRoot = getProductionDistPath();
+  const candidatePath = path.resolve(distRoot, normalizedPath);
+  const relativePath = path.relative(distRoot, candidatePath);
+  const isPathTraversal = relativePath.startsWith("..") || path.isAbsolute(relativePath);
+
+  if (isPathTraversal) {
+    return getProductionRendererPath();
+  }
+
+  if (existsSync(candidatePath)) {
+    return candidatePath;
+  }
+
+  return path.extname(normalizedPath) === "" ? getProductionRendererPath() : candidatePath;
+}
+
+async function handleAppProtocol(request: Request): Promise<Response> {
+  const assetPath = resolveAssetPath(request.url);
+
+  if (!existsSync(assetPath)) {
+    return new Response("Not Found", { status: 404 });
+  }
+
+  return net.fetch(pathToFileURL(assetPath).toString());
+}
+
+async function loadRenderer(window: BrowserWindow): Promise<void> {
+  if (isDevelopment && DEV_SERVER_URL) {
+    logEnvironment(DEV_SERVER_URL);
+    await window.loadURL(DEV_SERVER_URL);
+    return;
+  }
+
+  const productionUrl = getProductionAppUrl();
+  logEnvironment(productionUrl);
+  await window.loadURL(productionUrl);
+}
+
+async function createMainWindow(): Promise<BrowserWindow> {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return mainWindow;
+  }
+
+  mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     webPreferences: {
@@ -32,27 +115,46 @@ function createMainWindow(): BrowserWindow {
     },
   });
 
-  if (isDevelopment && DEV_SERVER_URL) {
-    void mainWindow.loadURL(DEV_SERVER_URL);
-  } else {
-    void mainWindow.loadFile(getProductionRendererPath());
-  }
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
 
+  await loadRenderer(mainWindow);
   return mainWindow;
 }
 
-app.whenReady().then(() => {
-  createMainWindow();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow) {
+      return;
+    }
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow();
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+
+    mainWindow.focus();
+  });
+
+  app.whenReady().then(async () => {
+    if (!isDevelopment) {
+      protocol.handle(APP_PROTOCOL, handleAppProtocol);
+    }
+
+    await createMainWindow();
+
+    app.on("activate", async () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        await createMainWindow();
+      }
+    });
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      app.quit();
     }
   });
-});
-
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
+}
