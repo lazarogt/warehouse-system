@@ -1,7 +1,11 @@
-import { app, BrowserWindow, net, protocol } from "electron";
+import { app, BrowserWindow, dialog, net, protocol } from "electron";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  initializeDesktopDatabase,
+  type DesktopDatabaseRuntime,
+} from "./src/main/db/init";
 
 const APP_PROTOCOL = "app";
 const DEV_SERVER_URL = process.env.ELECTRON_RENDERER_URL;
@@ -9,6 +13,7 @@ const isDevelopment = typeof DEV_SERVER_URL === "string" && DEV_SERVER_URL.lengt
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 let mainWindow: BrowserWindow | null = null;
+let desktopDatabaseRuntime: DesktopDatabaseRuntime | null = null;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -139,6 +144,23 @@ if (!hasSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    try {
+      desktopDatabaseRuntime = initializeDesktopDatabase({
+        userDataPath: app.getPath("userData"),
+        isDevelopment,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "An unknown database error occurred.";
+
+      console.error("[desktop:db] startup failed", {
+        message,
+      });
+      dialog.showErrorBox("Database Initialization Failed", message);
+      app.quit();
+      return;
+    }
+
     if (!isDevelopment) {
       protocol.handle(APP_PROTOCOL, handleAppProtocol);
     }
@@ -156,5 +178,10 @@ if (!hasSingleInstanceLock) {
     if (process.platform !== "darwin") {
       app.quit();
     }
+  });
+
+  app.on("will-quit", () => {
+    desktopDatabaseRuntime?.close();
+    desktopDatabaseRuntime = null;
   });
 }

@@ -143,6 +143,12 @@ Electron corre en una sola instancia y reutiliza la ventana existente si se inte
 En desarrollo el renderer carga `http://localhost:5173`
 En producción Electron sirve el SPA desde `client/dist` usando fallback a `index.html` para rutas internas
 Esto evita pantallas en blanco al refrescar rutas del frontend dentro del shell desktop
+Base de datos embebida:
+Electron inicializa SQLite en el proceso principal usando `better-sqlite3`
+La base se guarda en `app.getPath('userData')/warehouse.db`
+El schema se aplica con migraciones versionadas y no elimina tablas existentes
+Solo en desarrollo se insertan datos seed de ejemplo para `products`, `stock_movements` y `users`
+La base no se expone al renderer: queda encapsulada en servicios del main process listos para IPC futuro
 👨‍💻 Autor
 
 Lázaro González Torres
