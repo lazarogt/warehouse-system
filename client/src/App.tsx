@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
-import { APP_NAME, APP_VERSION, type LowStockAlert } from "../../shared/src";
+import { APP_NAME, APP_VERSION } from "../../shared/src";
 import { useAuth } from "./auth/AuthProvider";
 import AuthGuard from "./components/AuthGuard";
 import MotionButton from "./components/MotionButton";
@@ -7,7 +7,7 @@ import SectionLoader from "./components/SectionLoader";
 import { useToast } from "./components/ToastProvider";
 import WarehouseWorkspaceBar from "./components/WarehouseWorkspaceBar";
 import { useWarehouseContext } from "./context/WarehouseContext";
-import { createApiClient } from "./lib/api";
+import { useDataProvider } from "./services/data-provider";
 
 const DashboardHome = lazy(() => import("./components/DashboardHome"));
 const UsersSection = lazy(() => import("./components/UsersSection"));
@@ -115,7 +115,7 @@ const sectionAccent: Record<SectionId, string> = {
 export default function App() {
   const { apiBaseUrl, logout, user: currentUser } = useAuth();
   const { selectedWarehouse } = useWarehouseContext();
-  const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
+  const { getLowStockCount, isOffline } = useDataProvider();
   const { notify } = useToast();
   const [activeSection, setActiveSection] = useState<SectionId>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -141,8 +141,8 @@ export default function App() {
       }
 
       try {
-        const alerts = await api.get<LowStockAlert[]>("/alerts/low-stock");
-        setLowStockCount(alerts.length);
+        const count = await getLowStockCount();
+        setLowStockCount(count);
       } catch {
         setLowStockCount(0);
       }
@@ -158,7 +158,7 @@ export default function App() {
     return () => {
       window.removeEventListener("alerts:refresh", handleRefresh);
     };
-  }, [api, currentUser, activeSection]);
+  }, [activeSection, currentUser, getLowStockCount]);
 
   useEffect(() => {
     if (!availableSections.find((section) => section.id === activeSection)) {
@@ -184,7 +184,7 @@ export default function App() {
 
   const renderMainContent = () => {
     if (selectedSection.id === "dashboard") {
-      return <DashboardHome apiBaseUrl={apiBaseUrl} />;
+      return <DashboardHome />;
     }
 
     if (selectedSection.id === "usuarios") {
@@ -376,6 +376,11 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  {isOffline && (
+                    <div className="rounded-full border border-amber-300/20 bg-amber-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-amber-100">
+                      Offline Mode
+                    </div>
+                  )}
                   <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                     <p className="text-xs uppercase tracking-[0.22em] text-slate-400">
                       Usuario logueado

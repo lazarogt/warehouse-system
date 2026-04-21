@@ -7,6 +7,8 @@ The renderer is treated as untrusted. It does not receive Node.js, filesystem, o
 Only the preload script exposes the API:
 
 ```ts
+window.api.backup.createBackup()
+window.api.backup.restoreBackup(payload?)
 window.api.warehouse.getProducts()
 window.api.warehouse.createProduct(payload)
 window.api.warehouse.createWarehouse(payload)
@@ -42,6 +44,8 @@ Error codes currently used:
 | `getProducts` | `warehouse:getProducts` | none | `ApiResponse<Product[]>` |
 | `createProduct` | `warehouse:createProduct` | `{ name, sku, price, stock? }` | `ApiResponse<Product>` |
 | `createWarehouse` | `warehouse:createWarehouse` | `{ name, location }` | `ApiResponse<Warehouse>` |
+| `createBackup` | `backup:create` | none | `ApiResponse<CreateBackupResult>` |
+| `restoreBackup` | `backup:restore` | `{ filePath? }` | `ApiResponse<RestoreBackupResult>` |
 | `updateProductStock` | `warehouse:updateProductStock` | `{ productId, stock, warehouseId? }` | `ApiResponse<Product>` |
 | `getStockMovements` | `warehouse:getStockMovements` | `{ productId?, warehouseId? }` | `ApiResponse<StockMovement[]>` |
 | `getWarehouses` | `warehouse:getWarehouses` | none | `ApiResponse<Warehouse[]>` |
@@ -65,6 +69,7 @@ Error codes currently used:
 
 ## Security Notes
 
+- Backup and restore stay in the Electron main process and never expose filesystem access directly to the renderer
 - IPC handlers call `warehouse-data-service.ts` only
 - The IPC layer never executes SQL directly
 - SQL statements remain static and parameterized in the service/database layer

@@ -16,7 +16,7 @@
     "release:verify-version": "node ./scripts/assert-release-version.mjs",
     "postinstall": "node ./node_modules/electron-builder/cli.js install-app-deps",
     "start": "electron .",
-    "test": "node --import tsx --test src/**/*.test.ts"
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",

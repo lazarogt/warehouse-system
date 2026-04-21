@@ -1,4 +1,9 @@
 import type {
+  CreateBackupResult,
+  RestoreBackupPayload,
+  RestoreBackupResult,
+} from "../../../shared/src/types/desktop-backup-ipc";
+import type {
   ApiResponse,
   CreateProductPayload,
   CreateStockMovementPayload,
@@ -17,6 +22,10 @@ import type { WarehouseSyncResult } from "../../../shared/src/types/desktop-ware
 declare global {
   interface Window {
     api: {
+      backup: {
+        createBackup(): Promise<ApiResponse<CreateBackupResult>>;
+        restoreBackup(payload?: RestoreBackupPayload): Promise<ApiResponse<RestoreBackupResult>>;
+      };
       warehouse: {
         getProducts(): Promise<ApiResponse<Product[]>>;
         createProduct(payload: CreateProductPayload): Promise<ApiResponse<Product>>;

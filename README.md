@@ -149,6 +149,7 @@ Esto evita pantallas en blanco al refrescar rutas del frontend dentro del shell 
 Base de datos embebida:
 Electron inicializa SQLite en el proceso principal usando `better-sqlite3`
 La base se guarda en `app.getPath('userData')/warehouse.db`
+Los backups se guardan en `app.getPath('userData')/backups`
 La cola de sincronización persistente se guarda en `app.getPath('userData')/warehouse-sync-state.json`
 El schema se aplica con migraciones versionadas y no elimina tablas existentes
 Solo en desarrollo se insertan datos seed de ejemplo para `products`, `stock_movements` y `users`
@@ -163,6 +164,14 @@ Selector global de almacén con selección persistida al reabrir la app
 Alta rápida de almacén
 Alta rápida de producto con cantidad inicial en el almacén seleccionado
 Panel rápido para fijar cantidad por producto dentro del almacén activo
+Resiliencia offline desktop:
+Sync opcional: si no hay backend, el motor local sigue funcionando y la sincronización solo se difiere
+Backups manuales y automáticos cada 30 minutos con rotación máxima de 10 archivos
+Chequeo `PRAGMA integrity_check` al arrancar con opción de restaurar un backup antes de abrir la ventana
+Renderer offline-first:
+`client/src/services/data-provider.ts` decide API vs IPC según disponibilidad del backend
+Badge global `Offline Mode` cuando el backend no responde
+Productos, stock, movimientos y alertas usan fallback local por IPC sin tumbar la UI
 👨‍💻 Autor
 
 Lázaro González Torres

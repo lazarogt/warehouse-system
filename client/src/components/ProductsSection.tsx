@@ -4,11 +4,10 @@ import type {
   CategoryAttribute,
   Product,
   ProductInput,
-  ProductListResponse,
   ReportFormat,
 } from "../../../shared/src";
 import { useAuth } from "../auth/AuthProvider";
-import { createApiClient, getErrorMessage, saveDownloadedFile } from "../lib/api";
+import { getErrorMessage, saveDownloadedFile } from "../lib/api";
 import { safeArray } from "../lib/format";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import ConfirmDialog from "./ConfirmDialog";
@@ -21,6 +20,7 @@ import { useToast } from "./ToastProvider";
 import GlobalLoader from "./GlobalLoader";
 import { triggerAlertsRefresh } from "../utils/alerts";
 import MotionButton from "./MotionButton";
+import { useDataProvider } from "../services/data-provider";
 
 type ProductsSectionProps = {
   apiBaseUrl: string;
@@ -51,9 +51,9 @@ const initialState: ProductsSectionState = {
 };
 
 function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
-  const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
   const { user: currentUser } = useAuth();
   const { notify } = useToast();
+  const { isOffline, listProducts, lookupProduct } = useDataProvider();
   const [state, setState] = useState<ProductsSectionState>(initialState);
   const [filters, setFilters] = useState({
     search: "",
@@ -96,8 +96,18 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
   );
 
   const loadCategories = useCallback(async () => {
+    if (isOffline) {
+      setState((current) => ({
+        ...current,
+        categoriesLoading: false,
+        categories: [],
+      }));
+      return;
+    }
+
     try {
-      const categories = await api.get<Category[]>("/categories");
+      const { createApiClient } = await import("../lib/api");
+      const categories = await createApiClient(apiBaseUrl).get<Category[]>("/categories");
 
       setState((current) => ({
         ...current,
@@ -113,42 +123,17 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
         error: current.error ?? message,
       }));
     }
-  }, [api]);
+  }, [apiBaseUrl, isOffline]);
 
   const loadProducts = useCallback(async () => {
     const requestId = ++requestIdRef.current;
 
     try {
-      const params = new URLSearchParams({
-        page: String(page),
-        pageSize: String(pageSize),
+      const products = await listProducts({
+        page,
+        pageSize,
+        search: debouncedFilterValues.search,
       });
-
-      if (debouncedFilterValues.search.trim()) {
-        params.set("search", debouncedFilterValues.search.trim());
-      }
-
-      if (filters.categoryId) {
-        params.set("categoryId", filters.categoryId);
-      }
-
-      if (filters.attributeKey) {
-        params.set("attributeKey", filters.attributeKey);
-      }
-
-      if (debouncedFilterValues.attributeValue) {
-        params.set("attributeValue", debouncedFilterValues.attributeValue);
-      }
-
-      if (debouncedFilterValues.maximumMinimumStock) {
-        params.set("maximumMinimumStock", debouncedFilterValues.maximumMinimumStock);
-      }
-
-      if (debouncedFilterValues.maximumCurrentStock) {
-        params.set("maximumCurrentStock", debouncedFilterValues.maximumCurrentStock);
-      }
-
-      const products = await api.get<ProductListResponse>(`/products?${params.toString()}`);
 
       if (requestId !== requestIdRef.current) {
         return;
@@ -183,13 +168,13 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
       }));
     }
   }, [
-    api,
-    debouncedFilterValues,
-    filters.categoryId,
-    filters.attributeKey,
-    page,
-    pageSize,
-  ]);
+      debouncedFilterValues,
+      filters.categoryId,
+      filters.attributeKey,
+      listProducts,
+      page,
+      pageSize,
+    ]);
 
   useEffect(() => {
     void loadCategories();
@@ -205,6 +190,11 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
       return;
     }
 
+    if (isOffline) {
+      setAttributeFilterOptions([]);
+      return;
+    }
+
     const cachedAttributes = attributeOptionsCacheRef.current.get(filters.categoryId);
 
     if (cachedAttributes) {
@@ -216,7 +206,8 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
 
     const loadAttributeOptions = async () => {
       try {
-        const attributes = await api.get<CategoryAttribute[]>(
+        const { createApiClient } = await import("../lib/api");
+        const attributes = await createApiClient(apiBaseUrl).get<CategoryAttribute[]>(
           `/categories/${filters.categoryId}/attributes`,
         );
 
@@ -239,10 +230,11 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     return () => {
       active = false;
     };
-  }, [api, filters.categoryId]);
+  }, [apiBaseUrl, filters.categoryId, isOffline]);
 
-  const canManage = currentUser?.role === "admin" || currentUser?.role === "manager";
-  const canDelete = currentUser?.role === "admin";
+  const canManage =
+    !isOffline && (currentUser?.role === "admin" || currentUser?.role === "manager");
+  const canDelete = !isOffline && currentUser?.role === "admin";
   const totalPages = useMemo(() => Math.ceil(state.total / pageSize), [pageSize, state.total]);
 
   const handleOpenCreate = useCallback(() => {
@@ -271,6 +263,9 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     setState((current) => ({ ...current, saving: true, error: null }));
 
     try {
+      const { createApiClient } = await import("../lib/api");
+      const api = createApiClient(apiBaseUrl);
+
       if (formMode === "create") {
         await api.post<Product>("/products", payload);
         notify({
@@ -307,7 +302,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     }
 
     setState((current) => ({ ...current, saving: false }));
-  }, [api, editingProduct, formMode, handleCloseForm, loadProducts, notify, state.saving]);
+  }, [apiBaseUrl, editingProduct, formMode, handleCloseForm, loadProducts, notify, state.saving]);
 
   const handleDelete = useCallback(async (product: Product) => {
     setPendingDeleteProduct(product);
@@ -325,6 +320,8 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     }));
 
     try {
+      const { createApiClient } = await import("../lib/api");
+      const api = createApiClient(apiBaseUrl);
       await api.delete(`/products/${pendingDeleteProduct.id}`);
       await loadProducts();
       triggerAlertsRefresh();
@@ -354,7 +351,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
       deletingProductId: null,
     }));
     setPendingDeleteProduct(null);
-  }, [api, loadProducts, notify, pendingDeleteProduct, state.deletingProductId]);
+  }, [apiBaseUrl, loadProducts, notify, pendingDeleteProduct, state.deletingProductId]);
 
   const handleFiltersChange = useCallback((nextFilters: typeof filters) => {
     setFilters((current) => {
@@ -395,6 +392,8 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     setExportingFormat(format);
 
     try {
+      const { createApiClient } = await import("../lib/api");
+      const api = createApiClient(apiBaseUrl);
       const file = await api.download(`/reports/products/export?format=${format}`);
       saveDownloadedFile(file);
       notify({
@@ -411,7 +410,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     } finally {
       setExportingFormat(null);
     }
-  }, [api, exportingFormat, notify, state.total]);
+  }, [apiBaseUrl, exportingFormat, notify, state.total]);
 
   const handleQuickLookup = useCallback(async () => {
     if (lookupLoading) {
@@ -432,10 +431,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     setLookupLoading(true);
 
     try {
-      const isBarcode = /^\d+$/.test(value);
-      const product = await api.get<Product>(
-        `/products/lookup?${isBarcode ? `barcode=${encodeURIComponent(value)}` : `sku=${encodeURIComponent(value)}`}`,
-      );
+      const product = await lookupProduct(value);
       setLookupResult(product);
       notify({
         type: "success",
@@ -452,7 +448,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     } finally {
       setLookupLoading(false);
     }
-  }, [api, lookupLoading, notify, quickLookup]);
+  }, [lookupLoading, lookupProduct, notify, quickLookup]);
 
   const handleQuickLookupSubmit = useCallback(() => {
     void handleQuickLookup();
@@ -483,7 +479,9 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
 
       {!canManage && (
         <section className="rounded-[24px] border border-amber-400/20 bg-amber-500/10 px-5 py-4 text-sm text-amber-50">
-          Tu rol actual puede consultar productos, pero no crear, editar ni borrar.
+          {isOffline
+            ? "Modo offline activo: consulta el catalogo local y usa Producto rapido para nuevas altas."
+            : "Tu rol actual puede consultar productos, pero no crear, editar ni borrar."}
         </section>
       )}
 

@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   type LowStockAlert,
-  type ProductListResponse,
   type StockMovement,
 } from "../../../shared/src";
 import { useAuth } from "../auth/AuthProvider";
-import { createApiClient } from "../lib/api";
 import {
   Bar,
   BarChart,
@@ -17,10 +15,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-
-type DashboardHomeProps = {
-  apiBaseUrl: string;
-};
+import { useDataProvider } from "../services/data-provider";
 
 type DashboardState = {
   loading: boolean;
@@ -31,7 +26,6 @@ type DashboardState = {
   lowStockAlerts: LowStockAlert[];
 };
 
-const LOW_STOCK_THRESHOLD = 10;
 const MOVEMENT_CHART_COLORS = ["#fb923c", "#2dd4bf"];
 
 const initialState: DashboardState = {
@@ -43,28 +37,23 @@ const initialState: DashboardState = {
   lowStockAlerts: [],
 };
 
-export default function DashboardHome({ apiBaseUrl }: DashboardHomeProps) {
+export default function DashboardHome() {
   const [state, setState] = useState<DashboardState>(initialState);
-  const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
   const { user } = useAuth();
+  const { getDashboardSnapshot, isOffline } = useDataProvider();
 
   useEffect(() => {
     const loadDashboard = async () => {
       try {
-        const [users, products, movements, lowStockAlerts] = await Promise.all([
-          user?.role === "admin" ? api.get<unknown[]>("/users") : Promise.resolve([]),
-          api.get<ProductListResponse>("/products?page=1&pageSize=100"),
-          api.get<StockMovement[]>("/inventory/movements?limit=12"),
-          api.get<LowStockAlert[]>("/alerts/low-stock"),
-        ]);
+        const dashboardSnapshot = await getDashboardSnapshot(user?.role);
 
         setState({
           loading: false,
           error: null,
-          totalUsers: users.length,
-          totalProducts: products.total,
-          recentMovements: movements,
-          lowStockAlerts,
+          totalUsers: dashboardSnapshot.totalUsers,
+          totalProducts: dashboardSnapshot.totalProducts,
+          recentMovements: dashboardSnapshot.recentMovements,
+          lowStockAlerts: dashboardSnapshot.lowStockAlerts,
         });
       } catch (error) {
         setState({
@@ -76,7 +65,7 @@ export default function DashboardHome({ apiBaseUrl }: DashboardHomeProps) {
     };
 
     void loadDashboard();
-  }, [api, user?.role]);
+  }, [getDashboardSnapshot, user?.role]);
 
   const lowStockProducts = useMemo(() => {
     return state.lowStockAlerts
@@ -151,6 +140,11 @@ export default function DashboardHome({ apiBaseUrl }: DashboardHomeProps) {
             Vista inicial para monitorear operacion, usuarios, productos y alertas de stock bajo
             desde el panel administrativo.
           </p>
+          {isOffline && (
+            <div className="mt-4 inline-flex rounded-full border border-amber-300/20 bg-amber-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-amber-100">
+              Offline Mode
+            </div>
+          )}
 
           <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {metricCards.map((card) => (

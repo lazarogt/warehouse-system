@@ -3,7 +3,6 @@ import {
   STOCK_MOVEMENT_TYPES,
   type LowStockAlert,
   type Product,
-  type ProductListResponse,
   type ReportFormat,
   type StockLevel,
   type StockMovement,
@@ -21,6 +20,7 @@ import MotionButton from "./MotionButton";
 import SectionLoader from "./SectionLoader";
 import SectionNotice from "./SectionNotice";
 import { useToast } from "./ToastProvider";
+import { useDataProvider } from "../services/data-provider";
 
 type InventorySectionProps = {
   apiBaseUrl: string;
@@ -80,6 +80,7 @@ export default function InventorySection({
   const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
   const { user: currentUser } = useAuth();
   const { notify } = useToast();
+  const { getInventorySnapshot, isOffline, lookupProduct, postInventoryMovement } = useDataProvider();
   const [state, setState] = useState<InventorySectionState>(initialState);
   const [formValues, setFormValues] = useState<MovementFormValues>(createInitialForm);
   const [formErrors, setFormErrors] = useState<MovementFormErrors>({});
@@ -90,25 +91,18 @@ export default function InventorySection({
 
   const loadInventory = useCallback(async () => {
     try {
-      const [productsResponse, warehouses, locations, movements, stock, lowStockAlerts] = await Promise.all([
-        api.get<ProductListResponse>("/products?page=1&pageSize=100"),
-        api.get<Warehouse[]>("/warehouses"),
-        api.get<WarehouseLocation[]>("/locations"),
-        api.get<StockMovement[]>("/inventory/movements?limit=12"),
-        api.get<StockLevel[]>("/inventory/stock"),
-        api.get<LowStockAlert[]>("/alerts/low-stock"),
-      ]);
+      const inventorySnapshot = await getInventorySnapshot();
 
       setState((current) => ({
         ...current,
         loading: false,
         error: null,
-        products: safeArray(productsResponse.items),
-        warehouses: safeArray(warehouses),
-        locations: safeArray(locations),
-        movements: safeArray(movements),
-        stock: safeArray(stock),
-        lowStockAlerts: safeArray(lowStockAlerts),
+        products: safeArray(inventorySnapshot.products),
+        warehouses: safeArray(inventorySnapshot.warehouses),
+        locations: safeArray(inventorySnapshot.locations),
+        movements: safeArray(inventorySnapshot.movements),
+        stock: safeArray(inventorySnapshot.stock),
+        lowStockAlerts: safeArray(inventorySnapshot.lowStockAlerts),
       }));
     } catch (error) {
       const message = getErrorMessage(error, "No se pudieron cargar los datos de inventario.");
@@ -124,7 +118,7 @@ export default function InventorySection({
         message,
       });
     }
-  }, [api, notify]);
+  }, [getInventorySnapshot, notify]);
 
   useEffect(() => {
     void loadInventory();
@@ -238,7 +232,7 @@ export default function InventorySection({
     setState((current) => ({ ...current, saving: true, error: null }));
 
     try {
-      await api.post("/inventory/movements", {
+      await postInventoryMovement({
         productId: Number(formValues.productId),
         warehouseId: Number(formValues.warehouseId),
         warehouseLocationId: formValues.warehouseLocationId
@@ -336,10 +330,7 @@ export default function InventorySection({
     setLookupLoading(true);
 
     try {
-      const isBarcode = /^\d+$/.test(value);
-      const product = await api.get<Product>(
-        `/products/lookup?${isBarcode ? `barcode=${encodeURIComponent(value)}` : `sku=${encodeURIComponent(value)}`}`,
-      );
+      const product = await lookupProduct(value);
       setLookupResult(product);
       setFormValues((current) => ({
         ...current,
@@ -380,6 +371,11 @@ export default function InventorySection({
             Vista operativa para revisar entradas y salidas recientes con usuario responsable,
             cantidad, almacen y fecha del movimiento.
           </p>
+          {isOffline && (
+            <div className="mt-4 inline-flex rounded-full border border-amber-300/20 bg-amber-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-amber-100">
+              Offline Mode
+            </div>
+          )}
         </section>
       )}
 

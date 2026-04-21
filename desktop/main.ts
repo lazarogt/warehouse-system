@@ -4,9 +4,18 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { getPackagedRendererPath } from "./src/main/app/runtime-paths";
 import {
+  createDesktopBackupService,
+  getBackupsDirectory,
+  restoreBackupFile,
+  runIntegrityCheck,
+  type DesktopBackupService,
+} from "./src/main/backup/backup-service";
+import {
+  DATABASE_FILENAME,
   initializeDesktopDatabase,
   type DesktopDatabaseRuntime,
 } from "./src/main/db/init";
+import { registerBackupIpcHandlers } from "./src/main/ipc/backup-ipc";
 import { registerWarehouseIpcHandlers } from "./src/main/ipc/warehouse-ipc";
 import { registerWarehouseSyncIpcHandlers } from "./src/main/ipc/warehouse-sync-ipc";
 import {
@@ -24,6 +33,7 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 let mainWindow: BrowserWindow | null = null;
 let desktopDatabaseRuntime: DesktopDatabaseRuntime | null = null;
 let warehouseSyncService: WarehouseSyncService | null = null;
+let desktopBackupService: DesktopBackupService | null = null;
 let desktopAutoUpdateRuntime: DesktopAutoUpdateRuntime | null = null;
 
 protocol.registerSchemesAsPrivileged([
@@ -132,8 +142,30 @@ async function createMainWindow(): Promise<BrowserWindow> {
       contextIsolation: true,
       nodeIntegration: false,
       preload: getPreloadPath(),
+      sandbox: false,
     },
   });
+
+  if (isDevelopment) {
+    mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+      const channel = level >= 2 ? "error" : "log";
+      const sourceLabel = sourceId ? `${sourceId}:${line}` : `renderer:${line}`;
+
+      console[channel](`[desktop:renderer] ${sourceLabel} ${message}`);
+    });
+
+    mainWindow.webContents.on(
+      "did-fail-load",
+      (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
+        console.error("[desktop:renderer] load failed", {
+          errorCode,
+          errorDescription,
+          isMainFrame,
+          validatedUrl,
+        });
+      },
+    );
+  }
 
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
@@ -145,6 +177,151 @@ async function createMainWindow(): Promise<BrowserWindow> {
 
   await loadRenderer(mainWindow);
   return mainWindow;
+}
+
+function getDatabasePath(): string {
+  return path.join(app.getPath("userData"), DATABASE_FILENAME);
+}
+
+function stopDatabaseRuntime(): void {
+  warehouseSyncService?.stop();
+  warehouseSyncService = null;
+  desktopDatabaseRuntime?.close();
+  desktopDatabaseRuntime = null;
+}
+
+function stopDesktopServices(): void {
+  desktopAutoUpdateRuntime?.stop();
+  desktopAutoUpdateRuntime = null;
+  desktopBackupService?.stop();
+  desktopBackupService = null;
+  stopDatabaseRuntime();
+}
+
+async function promptForRestoreBackup(userDataPath: string): Promise<string | null> {
+  const backupsDirectory = getBackupsDirectory(userDataPath);
+
+  const result = await dialog.showOpenDialog({
+    buttonLabel: "Restore Backup",
+    defaultPath: backupsDirectory,
+    filters: [
+      {
+        name: "SQLite Backup",
+        extensions: ["db", "sqlite", "backup"],
+      },
+    ],
+    properties: ["openFile"],
+    title: "Select backup to restore",
+  });
+
+  return result.canceled ? null : result.filePaths[0] ?? null;
+}
+
+async function promptRestoreAfterFailure(
+  title: string,
+  detail: string,
+  userDataPath: string,
+): Promise<boolean> {
+  const result = await dialog.showMessageBox({
+    buttons: ["Restore backup", "Quit"],
+    cancelId: 1,
+    defaultId: 0,
+    detail,
+    message: title,
+    noLink: true,
+    type: "warning",
+  });
+
+  if (result.response !== 0) {
+    return false;
+  }
+
+  const backupFilePath = await promptForRestoreBackup(userDataPath);
+
+  if (!backupFilePath) {
+    return false;
+  }
+
+  try {
+    restoreBackupFile({
+      backupFilePath,
+      databasePath: getDatabasePath(),
+      logger: console,
+    });
+    return true;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "An unknown backup restore error occurred.";
+
+    dialog.showErrorBox("Restore Failed", message);
+    return true;
+  }
+}
+
+async function initializeDatabaseWithRecovery(): Promise<DesktopDatabaseRuntime | null> {
+  const userDataPath = app.getPath("userData");
+
+  while (true) {
+    let runtime: DesktopDatabaseRuntime;
+
+    try {
+      runtime = initializeDesktopDatabase({
+        userDataPath,
+        isDevelopment,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "An unknown database error occurred.";
+
+      console.error("[desktop:db] startup failed", {
+        message,
+      });
+
+      const restoreAttempted = await promptRestoreAfterFailure(
+        "Database Initialization Failed",
+        `${message}\n\nYou can restore a backup from the local backups folder.`,
+        userDataPath,
+      );
+
+      if (restoreAttempted) {
+        continue;
+      }
+
+      return null;
+    }
+
+    const integrity = runIntegrityCheck(runtime.database);
+
+    if (integrity.ok) {
+      console.info("[desktop:db] integrity_check ok");
+      return runtime;
+    }
+
+    console.error("[desktop:db] integrity_check failed", {
+      message: integrity.message,
+    });
+
+    runtime.close();
+
+    const restoreAttempted = await promptRestoreAfterFailure(
+      "Database Integrity Check Failed",
+      `${integrity.message}\n\nRestore a backup before opening the app.`,
+      userDataPath,
+    );
+
+    if (restoreAttempted) {
+      continue;
+    }
+
+    return null;
+  }
+}
+
+function scheduleAppRestart(): void {
+  setTimeout(() => {
+    app.relaunch();
+    app.exit(0);
+  }, 150);
 }
 
 if (!hasSingleInstanceLock) {
@@ -163,19 +340,9 @@ if (!hasSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
-    try {
-      desktopDatabaseRuntime = initializeDesktopDatabase({
-        userDataPath: app.getPath("userData"),
-        isDevelopment,
-      });
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "An unknown database error occurred.";
+    desktopDatabaseRuntime = await initializeDatabaseWithRecovery();
 
-      console.error("[desktop:db] startup failed", {
-        message,
-      });
-      dialog.showErrorBox("Database Initialization Failed", message);
+    if (!desktopDatabaseRuntime) {
       app.quit();
       return;
     }
@@ -188,6 +355,15 @@ if (!hasSingleInstanceLock) {
       database: desktopDatabaseRuntime.database,
       userDataPath: app.getPath("userData"),
     });
+    desktopBackupService = createDesktopBackupService({
+      getDatabase: () => desktopDatabaseRuntime?.database ?? null,
+      getDatabasePath: () => desktopDatabaseRuntime?.databasePath ?? getDatabasePath(),
+      logger: console,
+      onBeforeRestore: () => {
+        stopDatabaseRuntime();
+      },
+      userDataPath: app.getPath("userData"),
+    });
 
     registerWarehouseIpcHandlers({
       warehouseDataService: createSyncAwareWarehouseDataService(
@@ -198,7 +374,14 @@ if (!hasSingleInstanceLock) {
     registerWarehouseSyncIpcHandlers({
       syncService: warehouseSyncService,
     });
+    registerBackupIpcHandlers({
+      backupService: desktopBackupService,
+      logger: console,
+      promptForRestorePath: () => promptForRestoreBackup(app.getPath("userData")),
+      scheduleRestart: scheduleAppRestart,
+    });
     warehouseSyncService.start();
+    desktopBackupService.start();
 
     await createMainWindow();
     desktopAutoUpdateRuntime = configureAutoUpdates({
@@ -220,11 +403,6 @@ if (!hasSingleInstanceLock) {
   });
 
   app.on("will-quit", () => {
-    desktopAutoUpdateRuntime?.stop();
-    desktopAutoUpdateRuntime = null;
-    warehouseSyncService?.stop();
-    warehouseSyncService = null;
-    desktopDatabaseRuntime?.close();
-    desktopDatabaseRuntime = null;
+    stopDesktopServices();
   });
 }

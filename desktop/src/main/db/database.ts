@@ -15,6 +15,7 @@ export type TransactionMode = "deferred" | "immediate";
 export type DesktopDatabase = {
   readonly path: string;
   all<T>(sql: string, params?: StatementParams): T[];
+  backup(destinationFile: string): Promise<void>;
   close(): void;
   exec(sql: string): void;
   get<T>(sql: string, params?: StatementParams): T | undefined;
@@ -51,7 +52,7 @@ function ensureDatabaseDirectoryExists(databasePath: string): void {
 function applyPragmas(connection: Database.Database): void {
   connection.pragma("journal_mode = WAL");
   connection.pragma("foreign_keys = ON");
-  connection.pragma("synchronous = NORMAL");
+  connection.pragma("synchronous = FULL");
   connection.pragma("busy_timeout = 5000");
 }
 
@@ -156,6 +157,14 @@ export function createDesktopDatabase(options: CreateDesktopDatabaseOptions): De
         return getStatement(sql).all(...normalizeParameters(params)) as T[];
       } catch (error) {
         logDatabaseError(logger, "[desktop:db.all.failed]", sql, error);
+        throw error;
+      }
+    },
+    async backup(destinationFile: string): Promise<void> {
+      try {
+        await connection.backup(destinationFile);
+      } catch (error) {
+        logDatabaseError(logger, "[desktop:db.backup.failed]", destinationFile, error);
         throw error;
       }
     },

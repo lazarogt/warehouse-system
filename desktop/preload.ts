@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
+  CreateBackupResult,
+  RestoreBackupPayload,
+  RestoreBackupResult,
+} from "../shared/src/types/desktop-backup-ipc";
+import type {
   ApiResponse,
   CreateProductPayload,
   CreateStockMovementPayload,
@@ -14,6 +19,7 @@ import type {
   WarehouseStock,
 } from "../shared/src/types/desktop-warehouse-ipc";
 import type { WarehouseSyncResult } from "../shared/src/types/desktop-warehouse-sync-ipc";
+import { BACKUP_IPC_CHANNELS } from "./src/shared/backup-ipc-channels";
 import { WAREHOUSE_IPC_CHANNELS } from "./src/shared/warehouse-ipc-channels";
 import { WAREHOUSE_SYNC_IPC_CHANNELS } from "./src/shared/warehouse-sync-ipc-channels";
 
@@ -55,6 +61,16 @@ const warehouseApi = {
   },
 };
 
+const backupApi = {
+  createBackup(): Promise<ApiResponse<CreateBackupResult>> {
+    return ipcRenderer.invoke(BACKUP_IPC_CHANNELS.create);
+  },
+  restoreBackup(payload?: RestoreBackupPayload): Promise<ApiResponse<RestoreBackupResult>> {
+    return ipcRenderer.invoke(BACKUP_IPC_CHANNELS.restore, payload);
+  },
+};
+
 contextBridge.exposeInMainWorld("api", {
+  backup: backupApi,
   warehouse: warehouseApi,
 });

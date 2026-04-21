@@ -12,6 +12,8 @@ import {
 import { useAuth } from "../auth/AuthProvider";
 import { createApiClient } from "../lib/api";
 import CategoryAttributesManager from "./CategoryAttributesManager";
+import MotionButton from "./MotionButton";
+import { useToast } from "./ToastProvider";
 
 type ConfigurationSectionProps = {
   apiBaseUrl: string;
@@ -42,40 +44,106 @@ const initialState: ConfigurationState = {
 export default function ConfigurationSection({ apiBaseUrl }: ConfigurationSectionProps) {
   const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
   const { user: currentUser } = useAuth();
+  const { notify } = useToast();
   const [state, setState] = useState<ConfigurationState>(initialState);
+  const [backupAction, setBackupAction] = useState<"create" | "restore" | null>(null);
+  const isDesktopBackupAvailable = Boolean(window.api?.backup);
 
   useEffect(() => {
     const loadConfiguration = async () => {
-      try {
-        const [health, users, categories, warehouses, products] = await Promise.all([
-          api.get<HealthResponse>("/health"),
-          currentUser?.role === "admin" ? api.get<User[]>("/users") : Promise.resolve([]),
-          api.get<Category[]>("/categories"),
-          api.get<Warehouse[]>("/warehouses"),
-          api.get<ProductListResponse>("/products?page=1&pageSize=1"),
-        ]);
+      const results = await Promise.allSettled([
+        api.get<HealthResponse>("/health"),
+        currentUser?.role === "admin" ? api.get<User[]>("/users") : Promise.resolve([]),
+        api.get<Category[]>("/categories"),
+        api.get<Warehouse[]>("/warehouses"),
+        api.get<ProductListResponse>("/products?page=1&pageSize=1"),
+      ]);
 
-        setState({
-          loading: false,
-          error: null,
-          currentUser,
-          health,
-          users,
-          categories,
-          warehouses,
-          productsTotal: products.total,
-        });
-      } catch (error) {
-        setState({
-          ...initialState,
-          loading: false,
-          error: error instanceof Error ? error.message : "No se pudo cargar la configuracion.",
-        });
-      }
+      const [healthResult, usersResult, categoriesResult, warehousesResult, productsResult] = results;
+      const rejectedResults = results.filter((result) => result.status === "rejected");
+
+      setState({
+        loading: false,
+        error:
+          rejectedResults.length > 0
+            ? "Modo offline: algunos datos del backend no estan disponibles, pero la app local sigue operativa."
+            : null,
+        currentUser,
+        health: healthResult.status === "fulfilled" ? healthResult.value : null,
+        users: usersResult.status === "fulfilled" ? usersResult.value : [],
+        categories: categoriesResult.status === "fulfilled" ? categoriesResult.value : [],
+        warehouses: warehousesResult.status === "fulfilled" ? warehousesResult.value : [],
+        productsTotal:
+          productsResult.status === "fulfilled" ? productsResult.value.total : 0,
+      });
     };
 
     void loadConfiguration();
   }, [api, currentUser]);
+
+  const handleCreateBackup = async () => {
+    if (!window.api?.backup || backupAction) {
+      return;
+    }
+
+    setBackupAction("create");
+
+    try {
+      const response = await window.api.backup.createBackup();
+
+      if (!response.success) {
+        throw new Error(response.error.message || "No se pudo crear el backup.");
+      }
+
+      notify({
+        type: "success",
+        title: "Backup creado",
+        message: `Se guardo en ${response.data.fileName}.`,
+      });
+    } catch (error) {
+      notify({
+        type: "error",
+        title: "No se pudo crear el backup",
+        message: error instanceof Error ? error.message : "Intentalo de nuevo.",
+      });
+    } finally {
+      setBackupAction(null);
+    }
+  };
+
+  const handleRestoreBackup = async () => {
+    if (!window.api?.backup || backupAction) {
+      return;
+    }
+
+    setBackupAction("restore");
+
+    try {
+      const response = await window.api.backup.restoreBackup();
+
+      if (!response.success) {
+        throw new Error(response.error.message || "No se pudo restaurar el backup.");
+      }
+
+      if (!response.data.restored) {
+        return;
+      }
+
+      notify({
+        type: "success",
+        title: "Backup restaurado",
+        message: "La app se reiniciara para cargar la base restaurada.",
+      });
+    } catch (error) {
+      notify({
+        type: "error",
+        title: "No se pudo restaurar el backup",
+        message: error instanceof Error ? error.message : "Intentalo de nuevo.",
+      });
+    } finally {
+      setBackupAction(null);
+    }
+  };
 
   if (state.loading) {
     return (
@@ -131,6 +199,34 @@ export default function ConfigurationSection({ apiBaseUrl }: ConfigurationSectio
               <p className="mt-3 text-lg font-semibold text-white">{state.currentUser?.name ?? "Sin sesion"}</p>
               <p className="mt-1 text-sm text-slate-400">{state.currentUser?.role ?? "no disponible"}</p>
             </div>
+
+            {isDesktopBackupAvailable && (
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Respaldo local</p>
+                <p className="mt-3 text-lg font-semibold text-white">Proteccion de la base</p>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  Crea una copia local o restaura una anterior sin depender del backend.
+                </p>
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                  <MotionButton
+                    aria-label="Create Backup"
+                    onClick={() => void handleCreateBackup()}
+                    disabled={backupAction !== null}
+                    className="min-h-[46px] rounded-2xl border border-cyan-300/20 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {backupAction === "create" ? "Creating..." : "Create Backup"}
+                  </MotionButton>
+                  <MotionButton
+                    aria-label="Restore Backup"
+                    onClick={() => void handleRestoreBackup()}
+                    disabled={backupAction !== null}
+                    className="min-h-[46px] rounded-2xl border border-orange-300/20 bg-orange-500/10 px-4 text-sm font-semibold text-orange-100 transition hover:bg-orange-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {backupAction === "restore" ? "Restoring..." : "Restore Backup"}
+                  </MotionButton>
+                </div>
+              </div>
+            )}
 
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Health API</p>
