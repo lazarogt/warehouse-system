@@ -7,6 +7,21 @@ const rootDir = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    cssCodeSplit: true,
+    minify: "esbuild",
+    reportCompressedSize: true,
+    sourcemap: false,
+    target: "es2022",
+    rollupOptions: {
+      treeshake: true,
+      output: {
+        manualChunks: {
+          vendor: ["react", "react-dom", "recharts"],
+        },
+      },
+    },
+  },
   server: {
     host: "0.0.0.0",
     port: Number(process.env.VITE_PORT ?? 5173),

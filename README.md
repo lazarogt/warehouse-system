@@ -134,6 +134,9 @@ Scripts disponibles desde la raíz del repositorio:
 `npm run dev:desktop`: levanta Vite en `http://localhost:5173`, compila Electron en watch y abre la ventana desktop
 `npm run build:desktop`: genera el build de React y compila Electron
 `npm run start:desktop`: ejecuta Electron en modo producción cargando `client/dist`
+`npm run dist:desktop`: empaqueta instaladores desktop en `dist-electron`
+`npm run release:desktop`: build + publicación con `electron-builder` usando la configuración de release
+Proceso de release documentado en [`desktop/docs/release.md`](desktop/docs/release.md)
 Instalación requerida:
 `npm install` en la raíz para `concurrently`
 `npm install` dentro de `desktop`
@@ -146,6 +149,7 @@ Esto evita pantallas en blanco al refrescar rutas del frontend dentro del shell 
 Base de datos embebida:
 Electron inicializa SQLite en el proceso principal usando `better-sqlite3`
 La base se guarda en `app.getPath('userData')/warehouse.db`
+La cola de sincronización persistente se guarda en `app.getPath('userData')/warehouse-sync-state.json`
 El schema se aplica con migraciones versionadas y no elimina tablas existentes
 Solo en desarrollo se insertan datos seed de ejemplo para `products`, `stock_movements` y `users`
 La base no se expone al renderer: queda encapsulada en servicios del main process listos para IPC futuro

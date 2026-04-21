@@ -1,4 +1,13 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { AuthResponse, User } from "../../../shared/src";
 import { ApiError, createApiClient, getApiBaseUrl } from "../lib/api";
 
@@ -26,6 +35,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hasDispatchedAppReadyRef = useRef(false);
 
   const refreshSession = useCallback(async () => {
     setError(null);
@@ -71,6 +81,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
       window.removeEventListener("auth:unauthorized", handleUnauthorized);
     };
   }, []);
+
+  useEffect(() => {
+    if (loading || hasDispatchedAppReadyRef.current) {
+      return;
+    }
+
+    hasDispatchedAppReadyRef.current = true;
+    window.dispatchEvent(new Event("warehouse:app-ready"));
+  }, [loading]);
 
   const login = useCallback(
     async (identifier: string, password: string) => {

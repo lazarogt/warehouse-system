@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, net, protocol } from "electron";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { getPackagedRendererPath } from "./src/main/app/runtime-paths";
 import {
   initializeDesktopDatabase,
   type DesktopDatabaseRuntime,
@@ -13,6 +14,7 @@ import {
   createWarehouseSyncService,
   type WarehouseSyncService,
 } from "./src/main/sync/sync-service";
+import { configureAutoUpdates, type DesktopAutoUpdateRuntime } from "./src/main/updater/auto-update";
 
 const APP_PROTOCOL = "app";
 const DEV_SERVER_URL = process.env.ELECTRON_RENDERER_URL;
@@ -22,6 +24,7 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 let mainWindow: BrowserWindow | null = null;
 let desktopDatabaseRuntime: DesktopDatabaseRuntime | null = null;
 let warehouseSyncService: WarehouseSyncService | null = null;
+let desktopAutoUpdateRuntime: DesktopAutoUpdateRuntime | null = null;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -40,7 +43,7 @@ function getPreloadPath(): string {
 }
 
 function getProductionRendererPath(): string {
-  const rendererPath = path.join(__dirname, "../../client/dist/index.html");
+  const rendererPath = getPackagedRendererPath(__dirname);
 
   if (!existsSync(rendererPath)) {
     throw new Error(
@@ -121,11 +124,19 @@ async function createMainWindow(): Promise<BrowserWindow> {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    minWidth: 1024,
+    minHeight: 720,
+    backgroundColor: "#08111f",
+    show: false,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       preload: getPreloadPath(),
     },
+  });
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
   });
 
   mainWindow.on("closed", () => {
@@ -190,6 +201,10 @@ if (!hasSingleInstanceLock) {
     warehouseSyncService.start();
 
     await createMainWindow();
+    desktopAutoUpdateRuntime = configureAutoUpdates({
+      logger: console,
+    });
+    desktopAutoUpdateRuntime.start();
 
     app.on("activate", async () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -205,6 +220,8 @@ if (!hasSingleInstanceLock) {
   });
 
   app.on("will-quit", () => {
+    desktopAutoUpdateRuntime?.stop();
+    desktopAutoUpdateRuntime = null;
     warehouseSyncService?.stop();
     warehouseSyncService = null;
     desktopDatabaseRuntime?.close();

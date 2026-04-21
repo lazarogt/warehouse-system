@@ -3,6 +3,8 @@ client/node_modules/
 server/node_modules/
 client/dist/
 server/dist/
+desktop/renderer/
+dist-electron/
 .env
 .DS_Store
 node_modules/

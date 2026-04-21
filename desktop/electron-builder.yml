@@ -1,0 +1,33 @@
+appId: com.warehouse.system.desktop
+productName: Warehouse System
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+asar: true
+asarUnpack:
+  - node_modules/better-sqlite3/**/*
+compression: maximum
+directories:
+  output: ../dist-electron
+electronUpdaterCompatibility: ">=2.16"
+files:
+  - dist/**/*
+  - renderer/**/*
+  - node_modules/**/*
+  - package.json
+mac:
+  target:
+    - dmg
+  category: public.app-category.business
+publish:
+  - provider: github
+    releaseType: release
+linux:
+  category: Office
+  target:
+    - AppImage
+nsis:
+  allowToChangeInstallationDirectory: true
+  oneClick: false
+  perMachine: false
+win:
+  target:
+    - nsis
