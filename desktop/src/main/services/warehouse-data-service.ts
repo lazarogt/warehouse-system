@@ -2,6 +2,8 @@ import type { DatabaseLogger, DesktopDatabase } from "../db/database";
 
 const USER_ROLES = new Set(["admin", "manager", "operator"] as const);
 const MOVEMENT_TYPES = new Set(["in", "out"] as const);
+const DEFAULT_WAREHOUSE_NAME = "Primary Warehouse";
+const DEFAULT_WAREHOUSE_LOCATION = "Default location";
 
 type UserRole = "admin" | "manager" | "operator";
 type StockMovementType = "in" | "out";
@@ -22,12 +24,26 @@ export type ProductRecord = {
   stock: number;
 };
 
+export type WarehouseRecord = {
+  createdAt: string;
+  id: number;
+  location: string;
+  name: string;
+};
+
+export type WarehouseStockRecord = {
+  productId: number;
+  quantity: number;
+  warehouseId: number;
+};
+
 export type StockMovementRecord = {
   date: string;
   id: number;
   productId: number;
   quantity: number;
   type: StockMovementType;
+  warehouseId: number;
 };
 
 export type UserRecord = {
@@ -49,11 +65,35 @@ export type CreateUserInput = {
   role: UserRole;
 };
 
+export type CreateWarehouseInput = {
+  createdAt?: string | Date;
+  location: string;
+  name: string;
+};
+
+export type GetStockMovementsInput = {
+  productId?: number;
+  warehouseId?: number;
+};
+
 export type RecordStockMovementInput = {
   date?: string | Date;
   productId: number;
   quantity: number;
   type: StockMovementType;
+  warehouseId?: number;
+};
+
+export type SetWarehouseStockInput = {
+  productId: number;
+  quantity: number;
+  warehouseId: number;
+};
+
+export type UpdateProductStockInput = {
+  productId: number;
+  stock: number;
+  warehouseId?: number;
 };
 
 export type WarehouseSummaryCounts = {
@@ -68,12 +108,16 @@ export type WarehouseDataService = {
   countUsers(): number;
   createProduct(input: CreateProductInput): ProductRecord;
   createUser(input: CreateUserInput): UserRecord;
+  createWarehouse(input: CreateWarehouseInput): WarehouseRecord;
   getSummaryCounts(): WarehouseSummaryCounts;
+  getWarehouseStock(input: { productId: number; warehouseId: number }): WarehouseStockRecord;
   listProducts(): ProductRecord[];
-  listStockMovements(productId?: number): StockMovementRecord[];
+  listStockMovements(filters?: GetStockMovementsInput): StockMovementRecord[];
   listUsers(): UserRecord[];
+  listWarehouses(): WarehouseRecord[];
   recordStockMovement(input: RecordStockMovementInput): StockMovementRecord;
-  updateProductStock(input: { productId: number; stock: number }): ProductRecord;
+  setWarehouseStock(input: SetWarehouseStockInput): WarehouseStockRecord;
+  updateProductStock(input: UpdateProductStockInput): ProductRecord;
 };
 
 type CreateWarehouseDataServiceOptions = {
@@ -83,6 +127,10 @@ type CreateWarehouseDataServiceOptions = {
 
 type CountRow = {
   count: number;
+};
+
+type SumRow = {
+  totalQuantity: number | null;
 };
 
 const DEFAULT_LOGGER: DatabaseLogger = {
@@ -121,6 +169,47 @@ const SELECT_ALL_PRODUCTS_SQL = `
   ORDER BY id ASC;
 `;
 
+const SELECT_WAREHOUSE_BY_ID_SQL = `
+  SELECT
+    id,
+    name,
+    location,
+    created_at AS createdAt
+  FROM warehouses
+  WHERE id = ?;
+`;
+
+const SELECT_DEFAULT_WAREHOUSE_SQL = `
+  SELECT
+    id,
+    name,
+    location,
+    created_at AS createdAt
+  FROM warehouses
+  ORDER BY id ASC
+  LIMIT 1;
+`;
+
+const SELECT_ALL_WAREHOUSES_SQL = `
+  SELECT
+    id,
+    name,
+    location,
+    created_at AS createdAt
+  FROM warehouses
+  ORDER BY id ASC;
+`;
+
+const SELECT_WAREHOUSE_STOCK_SQL = `
+  SELECT
+    warehouse_id AS warehouseId,
+    product_id AS productId,
+    quantity
+  FROM warehouse_stock
+  WHERE warehouse_id = ?
+    AND product_id = ?;
+`;
+
 const SELECT_ALL_USERS_SQL = `
   SELECT
     id,
@@ -134,23 +223,11 @@ const SELECT_ALL_STOCK_MOVEMENTS_SQL = `
   SELECT
     id,
     product_id AS productId,
+    warehouse_id AS warehouseId,
     type,
     quantity,
     date
   FROM stock_movements
-  ORDER BY id ASC;
-`;
-
-const SELECT_STOCK_MOVEMENTS_BY_PRODUCT_SQL = `
-  SELECT
-    id,
-    product_id AS productId,
-    type,
-    quantity,
-    date
-  FROM stock_movements
-  WHERE product_id = ?
-  ORDER BY id ASC;
 `;
 
 const COUNT_PRODUCTS_SQL = `
@@ -166,6 +243,19 @@ const COUNT_STOCK_MOVEMENTS_SQL = `
 const COUNT_USERS_SQL = `
   SELECT COUNT(*) AS count
   FROM users;
+`;
+
+const SELECT_TOTAL_PRODUCT_STOCK_SQL = `
+  SELECT COALESCE(SUM(quantity), 0) AS totalQuantity
+  FROM warehouse_stock
+  WHERE product_id = ?;
+`;
+
+const SELECT_TOTAL_PRODUCT_STOCK_EXCLUDING_WAREHOUSE_SQL = `
+  SELECT COALESCE(SUM(quantity), 0) AS totalQuantity
+  FROM warehouse_stock
+  WHERE product_id = ?
+    AND warehouse_id != ?;
 `;
 
 function assertNonEmptyString(fieldName: string, value: unknown, maxLength: number): string {
@@ -262,6 +352,164 @@ function countRows(
   return database.get<CountRow>(sql)?.count ?? 0;
 }
 
+function getProductOrThrow(database: DesktopDatabase, productId: number): ProductRecord {
+  const product = database.get<ProductRecord>(SELECT_PRODUCT_BY_ID_SQL, [productId]);
+
+  if (!product) {
+    throw new DatabaseValidationError("productId does not reference an existing product.");
+  }
+
+  return product;
+}
+
+function getWarehouseOrThrow(database: DesktopDatabase, warehouseId: number): WarehouseRecord {
+  const warehouse = database.get<WarehouseRecord>(SELECT_WAREHOUSE_BY_ID_SQL, [warehouseId]);
+
+  if (!warehouse) {
+    throw new DatabaseValidationError("warehouseId does not reference an existing warehouse.");
+  }
+
+  return warehouse;
+}
+
+function ensureDefaultWarehouse(database: DesktopDatabase): WarehouseRecord {
+  const existingWarehouse = database.get<WarehouseRecord>(SELECT_DEFAULT_WAREHOUSE_SQL);
+
+  if (existingWarehouse) {
+    return existingWarehouse;
+  }
+
+  const result = database.run(
+    `
+      INSERT INTO warehouses (name, location, created_at)
+      VALUES (?, ?, ?);
+    `,
+    [DEFAULT_WAREHOUSE_NAME, DEFAULT_WAREHOUSE_LOCATION, new Date().toISOString()],
+  );
+
+  const warehouse = database.get<WarehouseRecord>(SELECT_WAREHOUSE_BY_ID_SQL, [
+    Number(result.lastInsertRowid),
+  ]);
+
+  if (!warehouse) {
+    throw new Error("Default warehouse could not be loaded after insert.");
+  }
+
+  return warehouse;
+}
+
+function upsertWarehouseStock(
+  database: DesktopDatabase,
+  warehouseId: number,
+  productId: number,
+  quantity: number,
+): void {
+  database.run(
+    `
+      INSERT INTO warehouse_stock (warehouse_id, product_id, quantity)
+      VALUES (?, ?, ?)
+      ON CONFLICT(warehouse_id, product_id)
+      DO UPDATE SET quantity = excluded.quantity;
+    `,
+    [warehouseId, productId, quantity],
+  );
+}
+
+function getWarehouseStockQuantity(
+  database: DesktopDatabase,
+  warehouseId: number,
+  productId: number,
+): number {
+  return database.get<WarehouseStockRecord>(SELECT_WAREHOUSE_STOCK_SQL, [warehouseId, productId])
+    ?.quantity ?? 0;
+}
+
+function getProductTotalStock(database: DesktopDatabase, productId: number): number {
+  return Number(
+    database.get<SumRow>(SELECT_TOTAL_PRODUCT_STOCK_SQL, [productId])?.totalQuantity ?? 0,
+  );
+}
+
+function getProductTotalStockExcludingWarehouse(
+  database: DesktopDatabase,
+  productId: number,
+  warehouseId: number,
+): number {
+  return Number(
+    database.get<SumRow>(SELECT_TOTAL_PRODUCT_STOCK_EXCLUDING_WAREHOUSE_SQL, [
+      productId,
+      warehouseId,
+    ])?.totalQuantity ?? 0,
+  );
+}
+
+function syncProductAggregateStock(database: DesktopDatabase, productId: number): ProductRecord {
+  const totalStock = getProductTotalStock(database, productId);
+
+  database.run(
+    `
+      UPDATE products
+      SET stock = ?
+      WHERE id = ?;
+    `,
+    [totalStock, productId],
+  );
+
+  const updatedProduct = database.get<ProductRecord>(SELECT_PRODUCT_BY_ID_SQL, [productId]);
+
+  if (!updatedProduct) {
+    throw new Error("Product could not be loaded after aggregate stock update.");
+  }
+
+  return updatedProduct;
+}
+
+function normalizeMovementFilters(filters?: GetStockMovementsInput): {
+  productId?: number;
+  warehouseId?: number;
+} {
+  if (!filters) {
+    return {};
+  }
+
+  return {
+    productId:
+      filters.productId === undefined
+        ? undefined
+        : assertPositiveInteger("productId", filters.productId),
+    warehouseId:
+      filters.warehouseId === undefined
+        ? undefined
+        : assertPositiveInteger("warehouseId", filters.warehouseId),
+  };
+}
+
+function buildStockMovementQuery(filters?: GetStockMovementsInput): {
+  params: number[];
+  sql: string;
+} {
+  const normalizedFilters = normalizeMovementFilters(filters);
+  const conditions: string[] = [];
+  const params: number[] = [];
+
+  if (normalizedFilters.productId !== undefined) {
+    conditions.push("product_id = ?");
+    params.push(normalizedFilters.productId);
+  }
+
+  if (normalizedFilters.warehouseId !== undefined) {
+    conditions.push("warehouse_id = ?");
+    params.push(normalizedFilters.warehouseId);
+  }
+
+  const whereClause = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
+
+  return {
+    sql: `${SELECT_ALL_STOCK_MOVEMENTS_SQL}${whereClause} ORDER BY id ASC;`,
+    params,
+  };
+}
+
 export function createWarehouseDataService(
   options: CreateWarehouseDataServiceOptions,
 ): WarehouseDataService {
@@ -275,15 +523,12 @@ export function createWarehouseDataService(
     listUsers() {
       return database.all<UserRecord>(SELECT_ALL_USERS_SQL);
     },
-    listStockMovements(productId) {
-      if (productId === undefined) {
-        return database.all<StockMovementRecord>(SELECT_ALL_STOCK_MOVEMENTS_SQL);
-      }
-
-      const normalizedProductId = assertPositiveInteger("productId", productId);
-      return database.all<StockMovementRecord>(SELECT_STOCK_MOVEMENTS_BY_PRODUCT_SQL, [
-        normalizedProductId,
-      ]);
+    listWarehouses() {
+      return database.all<WarehouseRecord>(SELECT_ALL_WAREHOUSES_SQL);
+    },
+    listStockMovements(filters) {
+      const query = buildStockMovementQuery(filters);
+      return database.all<StockMovementRecord>(query.sql, query.params);
     },
     countProducts() {
       return countRows(database, "products");
@@ -307,28 +552,26 @@ export function createWarehouseDataService(
       const price = assertNonNegativePrice("price", input.price);
       const stock = assertNonNegativeInteger("stock", input.stock ?? 0);
       const createdAt =
-        input.createdAt === undefined ? new Date().toISOString() : assertDateValue("createdAt", input.createdAt);
+        input.createdAt === undefined
+          ? new Date().toISOString()
+          : assertDateValue("createdAt", input.createdAt);
 
-      const result = database.run(
-        `
-          INSERT INTO products (name, sku, price, stock, created_at)
-          VALUES (?, ?, ?, ?, ?);
-        `,
-        [name, sku, price, stock, createdAt],
-      );
+      return database.transaction((transactionDatabase) => {
+        const defaultWarehouse = ensureDefaultWarehouse(transactionDatabase);
+        const result = transactionDatabase.run(
+          `
+            INSERT INTO products (name, sku, price, stock, created_at)
+            VALUES (?, ?, ?, ?, ?);
+          `,
+          [name, sku, price, stock, createdAt],
+        );
 
-      const product = database.get<ProductRecord>(SELECT_PRODUCT_BY_ID_SQL, [
-        Number(result.lastInsertRowid),
-      ]);
+        const productId = Number(result.lastInsertRowid);
+        upsertWarehouseStock(transactionDatabase, defaultWarehouse.id, productId, stock);
+        const product = syncProductAggregateStock(transactionDatabase, productId);
 
-      if (!product) {
-        logger.error("[desktop:db] product insert verification failed", {
-          sku,
-        });
-        throw new Error("Product could not be loaded after insert.");
-      }
-
-      return product;
+        return product;
+      }, "immediate");
     },
     createUser(input) {
       const name = assertNonEmptyString("name", input.name, 120);
@@ -362,6 +605,66 @@ export function createWarehouseDataService(
 
       return user;
     },
+    createWarehouse(input) {
+      const name = assertNonEmptyString("name", input.name, 120);
+      const location = assertNonEmptyString("location", input.location, 200);
+      const createdAt =
+        input.createdAt === undefined
+          ? new Date().toISOString()
+          : assertDateValue("createdAt", input.createdAt);
+      const result = database.run(
+        `
+          INSERT INTO warehouses (name, location, created_at)
+          VALUES (?, ?, ?);
+        `,
+        [name, location, createdAt],
+      );
+
+      const warehouse = database.get<WarehouseRecord>(SELECT_WAREHOUSE_BY_ID_SQL, [
+        Number(result.lastInsertRowid),
+      ]);
+
+      if (!warehouse) {
+        logger.error("[desktop:db] warehouse insert verification failed", {
+          name,
+          location,
+        });
+        throw new Error("Warehouse could not be loaded after insert.");
+      }
+
+      return warehouse;
+    },
+    getWarehouseStock(input) {
+      const warehouseId = assertPositiveInteger("warehouseId", input.warehouseId);
+      const productId = assertPositiveInteger("productId", input.productId);
+
+      getWarehouseOrThrow(database, warehouseId);
+      getProductOrThrow(database, productId);
+
+      return {
+        warehouseId,
+        productId,
+        quantity: getWarehouseStockQuantity(database, warehouseId, productId),
+      };
+    },
+    setWarehouseStock(input) {
+      const warehouseId = assertPositiveInteger("warehouseId", input.warehouseId);
+      const productId = assertPositiveInteger("productId", input.productId);
+      const quantity = assertNonNegativeInteger("quantity", input.quantity);
+
+      return database.transaction((transactionDatabase) => {
+        getWarehouseOrThrow(transactionDatabase, warehouseId);
+        getProductOrThrow(transactionDatabase, productId);
+        upsertWarehouseStock(transactionDatabase, warehouseId, productId, quantity);
+        syncProductAggregateStock(transactionDatabase, productId);
+
+        return {
+          warehouseId,
+          productId,
+          quantity,
+        };
+      }, "immediate");
+    },
     recordStockMovement(input) {
       const productId = assertPositiveInteger("productId", input.productId);
       const type = assertMovementType(input.type);
@@ -370,13 +673,20 @@ export function createWarehouseDataService(
         input.date === undefined ? new Date().toISOString() : assertDateValue("date", input.date);
 
       return database.transaction((transactionDatabase) => {
-        const product = transactionDatabase.get<ProductRecord>(SELECT_PRODUCT_BY_ID_SQL, [productId]);
-
-        if (!product) {
-          throw new DatabaseValidationError("productId does not reference an existing product.");
-        }
-
-        const nextStock = type === "in" ? product.stock + quantity : product.stock - quantity;
+        getProductOrThrow(transactionDatabase, productId);
+        const warehouse =
+          input.warehouseId === undefined
+            ? ensureDefaultWarehouse(transactionDatabase)
+            : getWarehouseOrThrow(
+                transactionDatabase,
+                assertPositiveInteger("warehouseId", input.warehouseId),
+              );
+        const currentStock = getWarehouseStockQuantity(
+          transactionDatabase,
+          warehouse.id,
+          productId,
+        );
+        const nextStock = type === "in" ? currentStock + quantity : currentStock - quantity;
 
         if (nextStock < 0) {
           throw new DatabaseValidationError("Stock cannot become negative.");
@@ -384,26 +694,21 @@ export function createWarehouseDataService(
 
         const insertResult = transactionDatabase.run(
           `
-            INSERT INTO stock_movements (product_id, type, quantity, date)
-            VALUES (?, ?, ?, ?);
+            INSERT INTO stock_movements (product_id, warehouse_id, type, quantity, date)
+            VALUES (?, ?, ?, ?, ?);
           `,
-          [productId, type, quantity, movementDate],
+          [productId, warehouse.id, type, quantity, movementDate],
         );
 
-        transactionDatabase.run(
-          `
-            UPDATE products
-            SET stock = ?
-            WHERE id = ?;
-          `,
-          [nextStock, productId],
-        );
+        upsertWarehouseStock(transactionDatabase, warehouse.id, productId, nextStock);
+        syncProductAggregateStock(transactionDatabase, productId);
 
         const stockMovement = transactionDatabase.get<StockMovementRecord>(
           `
             SELECT
               id,
               product_id AS productId,
+              warehouse_id AS warehouseId,
               type,
               quantity,
               date
@@ -425,30 +730,31 @@ export function createWarehouseDataService(
       const stock = assertNonNegativeInteger("stock", input.stock);
 
       return database.transaction((transactionDatabase) => {
-        const product = transactionDatabase.get<ProductRecord>(SELECT_PRODUCT_BY_ID_SQL, [productId]);
+        getProductOrThrow(transactionDatabase, productId);
 
-        if (!product) {
-          throw new DatabaseValidationError("productId does not reference an existing product.");
+        if (input.warehouseId !== undefined) {
+          const warehouseId = assertPositiveInteger("warehouseId", input.warehouseId);
+          getWarehouseOrThrow(transactionDatabase, warehouseId);
+          upsertWarehouseStock(transactionDatabase, warehouseId, productId, stock);
+          return syncProductAggregateStock(transactionDatabase, productId);
         }
 
-        transactionDatabase.run(
-          `
-            UPDATE products
-            SET stock = ?
-            WHERE id = ?;
-          `,
-          [stock, productId],
-        );
-
-        const updatedProduct = transactionDatabase.get<ProductRecord>(SELECT_PRODUCT_BY_ID_SQL, [
+        const defaultWarehouse = ensureDefaultWarehouse(transactionDatabase);
+        const stockOutsideDefaultWarehouse = getProductTotalStockExcludingWarehouse(
+          transactionDatabase,
           productId,
-        ]);
+          defaultWarehouse.id,
+        );
+        const defaultWarehouseStock = stock - stockOutsideDefaultWarehouse;
 
-        if (!updatedProduct) {
-          throw new Error("Product could not be loaded after stock update.");
+        if (defaultWarehouseStock < 0) {
+          throw new DatabaseValidationError(
+            "Stock cannot be set below the quantity already stored in other warehouses.",
+          );
         }
 
-        return updatedProduct;
+        upsertWarehouseStock(transactionDatabase, defaultWarehouse.id, productId, defaultWarehouseStock);
+        return syncProductAggregateStock(transactionDatabase, productId);
       }, "immediate");
     },
   };

@@ -3,10 +3,15 @@ import type {
   ApiResponse,
   CreateProductPayload,
   CreateStockMovementPayload,
+  CreateWarehousePayload,
   GetStockMovementsPayload,
+  GetWarehouseStockPayload,
   Product,
   StockMovement,
   UpdateProductStockPayload,
+  SetWarehouseStockPayload,
+  Warehouse,
+  WarehouseStock,
 } from "../../../../shared/src/types/desktop-warehouse-ipc";
 import type { DatabaseLogger } from "../db/database";
 import {
@@ -14,6 +19,8 @@ import {
   type ProductRecord,
   type StockMovementRecord,
   type WarehouseDataService,
+  type WarehouseRecord,
+  type WarehouseStockRecord,
 } from "../services/warehouse-data-service";
 import { WAREHOUSE_IPC_CHANNELS } from "../../shared/warehouse-ipc-channels";
 
@@ -175,9 +182,27 @@ function mapStockMovement(record: StockMovementRecord): StockMovement {
   return {
     id: record.id,
     productId: record.productId,
+    warehouseId: record.warehouseId,
     type: record.type,
     quantity: record.quantity,
     date: record.date,
+  };
+}
+
+function mapWarehouse(record: WarehouseRecord): Warehouse {
+  return {
+    id: record.id,
+    name: record.name,
+    location: record.location,
+    createdAt: record.createdAt,
+  };
+}
+
+function mapWarehouseStock(record: WarehouseStockRecord): WarehouseStock {
+  return {
+    warehouseId: record.warehouseId,
+    productId: record.productId,
+    quantity: record.quantity,
   };
 }
 
@@ -229,12 +254,25 @@ function validateCreateProductPayload(payload: unknown): CreateProductPayload {
   };
 }
 
+function validateCreateWarehousePayload(payload: unknown): CreateWarehousePayload {
+  const value = assertObjectPayload(payload, "createWarehouse");
+
+  return {
+    name: assertTrimmedString("name", value.name, 120),
+    location: assertTrimmedString("location", value.location, 200),
+  };
+}
+
 function validateUpdateProductStockPayload(payload: unknown): UpdateProductStockPayload {
   const value = assertObjectPayload(payload, "updateProductStock");
 
   return {
     productId: assertPositiveInteger("productId", value.productId),
     stock: assertNonNegativeInteger("stock", value.stock),
+    warehouseId:
+      value.warehouseId === undefined
+        ? undefined
+        : assertPositiveInteger("warehouseId", value.warehouseId),
   };
 }
 
@@ -246,6 +284,29 @@ function validateGetStockMovementsPayload(payload: unknown): GetStockMovementsPa
       value.productId === undefined
         ? undefined
         : assertPositiveInteger("productId", value.productId),
+    warehouseId:
+      value.warehouseId === undefined
+        ? undefined
+        : assertPositiveInteger("warehouseId", value.warehouseId),
+  };
+}
+
+function validateGetWarehouseStockPayload(payload: unknown): GetWarehouseStockPayload {
+  const value = assertObjectPayload(payload, "getWarehouseStock");
+
+  return {
+    warehouseId: assertPositiveInteger("warehouseId", value.warehouseId),
+    productId: assertPositiveInteger("productId", value.productId),
+  };
+}
+
+function validateSetWarehouseStockPayload(payload: unknown): SetWarehouseStockPayload {
+  const value = assertObjectPayload(payload, "setWarehouseStock");
+
+  return {
+    warehouseId: assertPositiveInteger("warehouseId", value.warehouseId),
+    productId: assertPositiveInteger("productId", value.productId),
+    quantity: assertNonNegativeInteger("quantity", value.quantity),
   };
 }
 
@@ -254,6 +315,10 @@ function validateCreateStockMovementPayload(payload: unknown): CreateStockMoveme
 
   return {
     productId: assertPositiveInteger("productId", value.productId),
+    warehouseId:
+      value.warehouseId === undefined
+        ? undefined
+        : assertPositiveInteger("warehouseId", value.warehouseId),
     type: assertStockMovementType(value.type),
     quantity: assertPositiveInteger("quantity", value.quantity),
     date: assertOptionalIsoDate("date", value.date),
@@ -283,6 +348,14 @@ export function registerWarehouseIpcHandlers(
   );
 
   registrar.handle(
+    WAREHOUSE_IPC_CHANNELS.createWarehouse,
+    wrapHandler(logger, "createWarehouse", (payload) => {
+      const validatedPayload = validateCreateWarehousePayload(payload);
+      return mapWarehouse(warehouseDataService.createWarehouse(validatedPayload));
+    }),
+  );
+
+  registrar.handle(
     WAREHOUSE_IPC_CHANNELS.updateProductStock,
     wrapHandler(logger, "updateProductStock", (payload) => {
       const validatedPayload = validateUpdateProductStockPayload(payload);
@@ -295,8 +368,23 @@ export function registerWarehouseIpcHandlers(
     wrapHandler(logger, "getStockMovements", (payload) => {
       const validatedPayload = validateGetStockMovementsPayload(payload);
       return warehouseDataService
-        .listStockMovements(validatedPayload.productId)
+        .listStockMovements(validatedPayload)
         .map(mapStockMovement);
+    }),
+  );
+
+  registrar.handle(
+    WAREHOUSE_IPC_CHANNELS.getWarehouses,
+    wrapHandler(logger, "getWarehouses", () => {
+      return warehouseDataService.listWarehouses().map(mapWarehouse);
+    }),
+  );
+
+  registrar.handle(
+    WAREHOUSE_IPC_CHANNELS.getWarehouseStock,
+    wrapHandler(logger, "getWarehouseStock", (payload) => {
+      const validatedPayload = validateGetWarehouseStockPayload(payload);
+      return mapWarehouseStock(warehouseDataService.getWarehouseStock(validatedPayload));
     }),
   );
 
@@ -305,6 +393,14 @@ export function registerWarehouseIpcHandlers(
     wrapHandler(logger, "createStockMovement", (payload) => {
       const validatedPayload = validateCreateStockMovementPayload(payload);
       return mapStockMovement(warehouseDataService.recordStockMovement(validatedPayload));
+    }),
+  );
+
+  registrar.handle(
+    WAREHOUSE_IPC_CHANNELS.setWarehouseStock,
+    wrapHandler(logger, "setWarehouseStock", (payload) => {
+      const validatedPayload = validateSetWarehouseStockPayload(payload);
+      return mapWarehouseStock(warehouseDataService.setWarehouseStock(validatedPayload));
     }),
   );
 

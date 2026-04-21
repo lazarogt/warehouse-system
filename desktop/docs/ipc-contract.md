@@ -9,9 +9,13 @@ Only the preload script exposes the API:
 ```ts
 window.api.warehouse.getProducts()
 window.api.warehouse.createProduct(payload)
+window.api.warehouse.createWarehouse(payload)
 window.api.warehouse.updateProductStock(payload)
 window.api.warehouse.getStockMovements(payload?)
+window.api.warehouse.getWarehouses()
+window.api.warehouse.getWarehouseStock(payload)
 window.api.warehouse.createStockMovement(payload)
+window.api.warehouse.setWarehouseStock(payload)
 ```
 
 ## Response Format
@@ -36,17 +40,23 @@ Error codes currently used:
 | --- | --- | --- | --- |
 | `getProducts` | `warehouse:getProducts` | none | `ApiResponse<Product[]>` |
 | `createProduct` | `warehouse:createProduct` | `{ name, sku, price, stock? }` | `ApiResponse<Product>` |
-| `updateProductStock` | `warehouse:updateProductStock` | `{ productId, stock }` | `ApiResponse<Product>` |
-| `getStockMovements` | `warehouse:getStockMovements` | `{ productId? }` | `ApiResponse<StockMovement[]>` |
-| `createStockMovement` | `warehouse:createStockMovement` | `{ productId, type, quantity, date? }` | `ApiResponse<StockMovement>` |
+| `createWarehouse` | `warehouse:createWarehouse` | `{ name, location }` | `ApiResponse<Warehouse>` |
+| `updateProductStock` | `warehouse:updateProductStock` | `{ productId, stock, warehouseId? }` | `ApiResponse<Product>` |
+| `getStockMovements` | `warehouse:getStockMovements` | `{ productId?, warehouseId? }` | `ApiResponse<StockMovement[]>` |
+| `getWarehouses` | `warehouse:getWarehouses` | none | `ApiResponse<Warehouse[]>` |
+| `getWarehouseStock` | `warehouse:getWarehouseStock` | `{ warehouseId, productId }` | `ApiResponse<WarehouseStock>` |
+| `createStockMovement` | `warehouse:createStockMovement` | `{ productId, warehouseId?, type, quantity, date? }` | `ApiResponse<StockMovement>` |
+| `setWarehouseStock` | `warehouse:setWarehouseStock` | `{ warehouseId, productId, quantity }` | `ApiResponse<WarehouseStock>` |
 
 ## Validation Rules
 
 - `name`: string, trimmed, required, max 120 chars
 - `sku`: string, trimmed, required, max 64 chars
+- `location`: string, trimmed, required, max 200 chars
 - `price`: finite number, non-negative
 - `stock`: integer, non-negative
 - `productId`: integer, positive
+- `warehouseId`: integer, positive
 - `quantity`: integer, positive
 - `type`: `"in"` or `"out"`
 - `date`: optional valid ISO-compatible date string
@@ -58,3 +68,4 @@ Error codes currently used:
 - SQL statements remain static and parameterized in the service/database layer
 - Invalid payloads are rejected before reaching the database layer
 - SQLite remains isolated in the Electron main process
+- Legacy payloads without `warehouseId` continue to target the default warehouse for compatibility

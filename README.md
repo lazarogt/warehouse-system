@@ -153,6 +153,11 @@ La cola de sincronización persistente se guarda en `app.getPath('userData')/war
 El schema se aplica con migraciones versionadas y no elimina tablas existentes
 Solo en desarrollo se insertan datos seed de ejemplo para `products`, `stock_movements` y `users`
 La base no se expone al renderer: queda encapsulada en servicios del main process listos para IPC futuro
+Arquitectura multi-almacén desktop:
+`warehouses` modela almacenes físicos
+`warehouse_stock` almacena existencias por `(warehouse_id, product_id)`
+`stock_movements` ahora registra `warehouse_id`
+`products.stock` se mantiene como stock agregado para compatibilidad con el catálogo actual
 👨‍💻 Autor
 
 Lázaro González Torres

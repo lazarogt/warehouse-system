@@ -78,6 +78,23 @@ function seedDevelopmentData(
   logger: DatabaseLogger,
 ): void {
   const counts = warehouseData.getSummaryCounts();
+  const warehouses = warehouseData.listWarehouses();
+
+  if (warehouses.length === 0) {
+    warehouseData.createWarehouse({
+      name: "Central Warehouse",
+      location: "Havana HQ",
+    });
+  }
+
+  if (warehouseData.listWarehouses().length === 1) {
+    warehouseData.createWarehouse({
+      name: "Overflow Warehouse",
+      location: "Santiago Hub",
+    });
+  }
+
+  const [primaryWarehouse, secondaryWarehouse] = warehouseData.listWarehouses();
 
   if (counts.users === 0) {
     warehouseData.createUser({ name: "Desktop Admin", role: "admin" });
@@ -109,16 +126,19 @@ function seedDevelopmentData(
       productId: keyboard.id,
       quantity: 25,
       type: "in",
+      warehouseId: primaryWarehouse?.id,
     });
     warehouseData.recordStockMovement({
       productId: mouse.id,
       quantity: 40,
       type: "in",
+      warehouseId: primaryWarehouse?.id,
     });
     warehouseData.recordStockMovement({
       productId: monitor.id,
       quantity: 12,
       type: "in",
+      warehouseId: secondaryWarehouse?.id ?? primaryWarehouse?.id,
     });
   }
 

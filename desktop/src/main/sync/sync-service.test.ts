@@ -62,6 +62,8 @@ test("sync service backfills stock movements, persists retries, and eventually p
           if (url.pathname.endsWith("/stock-movements")) {
             pushAttempts += 1;
             assert.equal(init?.method, "POST");
+            const payload = JSON.parse(String(init?.body)) as { warehouseId?: number };
+            assert.equal(typeof payload.warehouseId, "number");
 
             if (pushAttempts === 1) {
               throw new TypeError("network unavailable");

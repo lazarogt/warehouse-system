@@ -46,6 +46,7 @@ const SELECT_STOCK_MOVEMENT_BY_ID_SQL = `
   SELECT
     id,
     product_id AS productId,
+    warehouse_id AS warehouseId,
     type,
     quantity,
     date
@@ -57,6 +58,7 @@ const SELECT_STOCK_MOVEMENTS_AFTER_ID_SQL = `
   SELECT
     id,
     product_id AS productId,
+    warehouse_id AS warehouseId,
     type,
     quantity,
     date
@@ -65,6 +67,28 @@ const SELECT_STOCK_MOVEMENTS_AFTER_ID_SQL = `
   ORDER BY id ASC
   LIMIT ?;
 `;
+
+const SELECT_DEFAULT_WAREHOUSE_ID_SQL = `
+  SELECT id
+  FROM warehouses
+  ORDER BY id ASC
+  LIMIT 1;
+`;
+
+const SELECT_TOTAL_PRODUCT_STOCK_EXCLUDING_WAREHOUSE_SQL = `
+  SELECT COALESCE(SUM(quantity), 0) AS totalQuantity
+  FROM warehouse_stock
+  WHERE product_id = ?
+    AND warehouse_id != ?;
+`;
+
+type WarehouseIdRow = {
+  id: number;
+};
+
+type SumRow = {
+  totalQuantity: number | null;
+};
 
 export type SyncTrigger = "interval" | "manual" | "startup";
 export type ProductConflictStrategy =
@@ -149,6 +173,7 @@ type PushStockMovementPayload = {
   quantity: number;
   sku: string;
   type: "in" | "out";
+  warehouseId: number;
 };
 
 type CreateWarehouseSyncServiceOptions = {
@@ -548,6 +573,81 @@ function createDisabledSyncResult(
   };
 }
 
+function ensureDefaultWarehouseId(database: DesktopDatabase): number {
+  const existingWarehouseId = database.get<WarehouseIdRow>(SELECT_DEFAULT_WAREHOUSE_ID_SQL)?.id;
+
+  if (existingWarehouseId) {
+    return existingWarehouseId;
+  }
+
+  const result = database.run(
+    `
+      INSERT INTO warehouses (name, location, created_at)
+      VALUES (?, ?, ?);
+    `,
+    ["Primary Warehouse", "Default location", new Date().toISOString()],
+  );
+
+  return Number(result.lastInsertRowid);
+}
+
+function getStockOutsideWarehouse(
+  database: DesktopDatabase,
+  productId: number,
+  warehouseId: number,
+): number {
+  return Number(
+    database.get<SumRow>(SELECT_TOTAL_PRODUCT_STOCK_EXCLUDING_WAREHOUSE_SQL, [
+      productId,
+      warehouseId,
+    ])?.totalQuantity ?? 0,
+  );
+}
+
+function syncRemoteProductStock(
+  database: DesktopDatabase,
+  productId: number,
+  requestedTotalStock: number,
+  logger: DatabaseLogger,
+): void {
+  const defaultWarehouseId = ensureDefaultWarehouseId(database);
+  const stockOutsideDefaultWarehouse = getStockOutsideWarehouse(
+    database,
+    productId,
+    defaultWarehouseId,
+  );
+  const nextDefaultWarehouseStock = Math.max(requestedTotalStock - stockOutsideDefaultWarehouse, 0);
+  const totalStock = nextDefaultWarehouseStock + stockOutsideDefaultWarehouse;
+
+  if (totalStock !== requestedTotalStock) {
+    logger.warn("[desktop:sync] remote stock could not fully overwrite multi-warehouse local state", {
+      productId,
+      requestedTotalStock,
+      preservedExternalWarehouseStock: stockOutsideDefaultWarehouse,
+      appliedTotalStock: totalStock,
+    });
+  }
+
+  database.run(
+    `
+      INSERT INTO warehouse_stock (warehouse_id, product_id, quantity)
+      VALUES (?, ?, ?)
+      ON CONFLICT(warehouse_id, product_id)
+      DO UPDATE SET quantity = excluded.quantity;
+    `,
+    [defaultWarehouseId, productId, nextDefaultWarehouseStock],
+  );
+
+  database.run(
+    `
+      UPDATE products
+      SET stock = ?
+      WHERE id = ?;
+    `,
+    [totalStock, productId],
+  );
+}
+
 function isRetryableStatus(statusCode: number): boolean {
   return statusCode >= 500 || statusCode === 408 || statusCode === 429;
 }
@@ -776,6 +876,7 @@ class DefaultWarehouseSyncService implements WarehouseSyncService {
     return {
       localMovementId: movement.id,
       productId: movement.productId,
+      warehouseId: movement.warehouseId,
       sku: product.sku,
       type: movement.type,
       quantity: movement.quantity,
@@ -991,23 +1092,25 @@ class DefaultWarehouseSyncService implements WarehouseSyncService {
       this.database.get<ProductRecord>(SELECT_PRODUCT_BY_SKU_SQL, [remoteProduct.sku]);
 
     this.database.transaction((transactionDatabase) => {
+      let productId: number;
+
       if (existingProduct) {
         transactionDatabase.run(
           `
             UPDATE products
-            SET name = ?, sku = ?, price = ?, stock = ?
+            SET name = ?, sku = ?, price = ?
             WHERE id = ?;
           `,
           [
             remoteProduct.name,
             remoteProduct.sku,
             remoteProduct.price,
-            remoteProduct.stock,
             existingProduct.id,
           ],
         );
+        productId = existingProduct.id;
       } else {
-        transactionDatabase.run(
+        const result = transactionDatabase.run(
           `
             INSERT INTO products (name, sku, price, stock, created_at)
             VALUES (?, ?, ?, ?, ?);
@@ -1016,11 +1119,19 @@ class DefaultWarehouseSyncService implements WarehouseSyncService {
             remoteProduct.name,
             remoteProduct.sku,
             remoteProduct.price,
-            remoteProduct.stock,
+            0,
             remoteProduct.createdAt ?? remoteProduct.updatedAt,
           ],
         );
+        productId = Number(result.lastInsertRowid);
       }
+
+      syncRemoteProductStock(
+        transactionDatabase,
+        productId,
+        remoteProduct.stock,
+        this.logger,
+      );
     }, "immediate");
 
     if (matchedSku && matchedSku !== remoteProduct.sku) {
