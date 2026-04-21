@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { AuthProvider } from "./auth/AuthProvider";
 import App from "./App";
 import { ToastProvider } from "./components/ToastProvider";
+import { WarehouseProvider } from "./context/WarehouseContext";
 import "./styles.css";
 
 const bootSplashElement = document.getElementById("app-loading");
@@ -25,7 +26,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ToastProvider>
       <AuthProvider>
-        <App />
+        <WarehouseProvider>
+          <App />
+        </WarehouseProvider>
       </AuthProvider>
     </ToastProvider>
   </React.StrictMode>,

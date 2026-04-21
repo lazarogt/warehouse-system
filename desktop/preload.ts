@@ -36,6 +36,9 @@ const warehouseApi = {
   getWarehouses(): Promise<ApiResponse<Warehouse[]>> {
     return ipcRenderer.invoke(WAREHOUSE_IPC_CHANNELS.getWarehouses);
   },
+  listWarehouses(): Promise<ApiResponse<Warehouse[]>> {
+    return ipcRenderer.invoke(WAREHOUSE_IPC_CHANNELS.getWarehouses);
+  },
   getWarehouseStock(payload: GetWarehouseStockPayload): Promise<ApiResponse<WarehouseStock>> {
     return ipcRenderer.invoke(WAREHOUSE_IPC_CHANNELS.getWarehouseStock, payload);
   },

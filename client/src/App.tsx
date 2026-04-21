@@ -5,6 +5,8 @@ import AuthGuard from "./components/AuthGuard";
 import MotionButton from "./components/MotionButton";
 import SectionLoader from "./components/SectionLoader";
 import { useToast } from "./components/ToastProvider";
+import WarehouseWorkspaceBar from "./components/WarehouseWorkspaceBar";
+import { useWarehouseContext } from "./context/WarehouseContext";
 import { createApiClient } from "./lib/api";
 
 const DashboardHome = lazy(() => import("./components/DashboardHome"));
@@ -112,6 +114,7 @@ const sectionAccent: Record<SectionId, string> = {
 
 export default function App() {
   const { apiBaseUrl, logout, user: currentUser } = useAuth();
+  const { selectedWarehouse } = useWarehouseContext();
   const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
   const { notify } = useToast();
   const [activeSection, setActiveSection] = useState<SectionId>("dashboard");
@@ -365,7 +368,9 @@ export default function App() {
                       {selectedSection.label}
                     </p>
                     <p className="mt-1 text-sm text-slate-400">
-                      Estructura general del dashboard administrativo.
+                      {selectedWarehouse
+                        ? `Operacion rapida en ${selectedWarehouse.name}.`
+                        : "Selecciona un almacen para usar la operacion rapida."}
                     </p>
                   </div>
                 </div>
@@ -411,8 +416,11 @@ export default function App() {
             </header>
 
             <main className="flex-1 px-4 py-6 xl:px-8 xl:py-8">
+              <WarehouseWorkspaceBar />
               <Suspense fallback={<SectionLoader />}>
-                <div key={selectedSection.id}>{renderMainContent()}</div>
+                <div key={selectedSection.id} className="mt-6">
+                  {renderMainContent()}
+                </div>
               </Suspense>
             </main>
           </div>

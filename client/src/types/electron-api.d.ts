@@ -26,6 +26,7 @@ declare global {
           payload?: GetStockMovementsPayload,
         ): Promise<ApiResponse<StockMovement[]>>;
         getWarehouses(): Promise<ApiResponse<Warehouse[]>>;
+        listWarehouses(): Promise<ApiResponse<Warehouse[]>>;
         getWarehouseStock(payload: GetWarehouseStockPayload): Promise<ApiResponse<WarehouseStock>>;
         createStockMovement(
           payload: CreateStockMovementPayload,

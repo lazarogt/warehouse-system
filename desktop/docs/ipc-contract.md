@@ -13,6 +13,7 @@ window.api.warehouse.createWarehouse(payload)
 window.api.warehouse.updateProductStock(payload)
 window.api.warehouse.getStockMovements(payload?)
 window.api.warehouse.getWarehouses()
+window.api.warehouse.listWarehouses()
 window.api.warehouse.getWarehouseStock(payload)
 window.api.warehouse.createStockMovement(payload)
 window.api.warehouse.setWarehouseStock(payload)
@@ -44,6 +45,7 @@ Error codes currently used:
 | `updateProductStock` | `warehouse:updateProductStock` | `{ productId, stock, warehouseId? }` | `ApiResponse<Product>` |
 | `getStockMovements` | `warehouse:getStockMovements` | `{ productId?, warehouseId? }` | `ApiResponse<StockMovement[]>` |
 | `getWarehouses` | `warehouse:getWarehouses` | none | `ApiResponse<Warehouse[]>` |
+| `listWarehouses` | `warehouse:getWarehouses` | none | `ApiResponse<Warehouse[]>` |
 | `getWarehouseStock` | `warehouse:getWarehouseStock` | `{ warehouseId, productId }` | `ApiResponse<WarehouseStock>` |
 | `createStockMovement` | `warehouse:createStockMovement` | `{ productId, warehouseId?, type, quantity, date? }` | `ApiResponse<StockMovement>` |
 | `setWarehouseStock` | `warehouse:setWarehouseStock` | `{ warehouseId, productId, quantity }` | `ApiResponse<WarehouseStock>` |

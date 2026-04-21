@@ -158,6 +158,11 @@ Arquitectura multi-almacén desktop:
 `warehouse_stock` almacena existencias por `(warehouse_id, product_id)`
 `stock_movements` ahora registra `warehouse_id`
 `products.stock` se mantiene como stock agregado para compatibilidad con el catálogo actual
+UX operativo desktop:
+Selector global de almacén con selección persistida al reabrir la app
+Alta rápida de almacén
+Alta rápida de producto con cantidad inicial en el almacén seleccionado
+Panel rápido para fijar cantidad por producto dentro del almacén activo
 👨‍💻 Autor
 
 Lázaro González Torres
