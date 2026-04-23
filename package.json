@@ -1,8 +1,10 @@
 {
   "name": "warehouse-system",
   "private": true,
+  "version": "0.4.0",
   "scripts": {
     "dev:desktop": "concurrently -k \"npm run dev --prefix client -- --host 0.0.0.0 --port 5173 --strictPort\" \"npm run dev:watch --prefix desktop\" \"npm run dev:electron --prefix desktop\"",
+    "qa:desktop": "npm run dev:desktop",
     "build:desktop": "npm run build --prefix client && npm run build --prefix desktop",
     "start:desktop": "npm run build:desktop && npm run start --prefix desktop",
     "test:desktop": "npm run test --prefix desktop",

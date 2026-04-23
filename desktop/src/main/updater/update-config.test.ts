@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { AUTO_UPDATE_DISABLE_ENV_NAME, isAutoUpdateEnabled } from "./update-config";
 
 test("isAutoUpdateEnabled disables updates outside packaged builds", () => {

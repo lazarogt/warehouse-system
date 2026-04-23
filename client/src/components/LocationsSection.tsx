@@ -6,8 +6,8 @@ import {
   type WarehouseLocationInput,
 } from "../../../shared/src";
 import { useAuth } from "../auth/AuthProvider";
-import { createApiClient } from "../lib/api";
 import { safeArray } from "../lib/format";
+import { useDataProvider } from "../services/data-provider";
 import ConfirmDialog from "./ConfirmDialog";
 import Modal from "./Modal";
 import MotionButton from "./MotionButton";
@@ -55,7 +55,7 @@ const createInitialForm = (location?: WarehouseLocation | null): FormValues => (
 });
 
 export default function LocationsSection({ apiBaseUrl }: LocationsSectionProps) {
-  const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
+  const { http } = useDataProvider();
   const { user: currentUser } = useAuth();
   const { notify } = useToast();
   const [state, setState] = useState<LocationsState>(initialState);
@@ -68,8 +68,8 @@ export default function LocationsSection({ apiBaseUrl }: LocationsSectionProps) 
   const loadData = useCallback(async () => {
     try {
       const [warehouses, locations] = await Promise.all([
-        api.get<Warehouse[]>("/warehouses"),
-        api.get<WarehouseLocation[]>("/locations"),
+        http.get<Warehouse[]>("/warehouses"),
+        http.get<WarehouseLocation[]>("/locations"),
       ]);
 
       setState({
@@ -87,7 +87,7 @@ export default function LocationsSection({ apiBaseUrl }: LocationsSectionProps) 
         error: error instanceof Error ? error.message : "No se pudieron cargar las ubicaciones.",
       }));
     }
-  }, [api]);
+  }, [http]);
 
   useEffect(() => {
     void loadData();
@@ -155,14 +155,14 @@ export default function LocationsSection({ apiBaseUrl }: LocationsSectionProps) 
 
     try {
       if (editingLocation) {
-        await api.put(`/locations/${editingLocation.id}`, payload);
+        await http.put(`/locations/${editingLocation.id}`, payload);
         notify({
           type: "success",
           title: "Ubicacion actualizada",
           message: `${payload.name} se actualizo correctamente.`,
         });
       } else {
-        await api.post("/locations", payload);
+        await http.post("/locations", payload);
         notify({
           type: "success",
           title: "Ubicacion creada",
@@ -196,7 +196,7 @@ export default function LocationsSection({ apiBaseUrl }: LocationsSectionProps) 
     setState((current) => ({ ...current, deletingId: pendingDelete.id }));
 
     try {
-      await api.delete(`/locations/${pendingDelete.id}`);
+      await http.delete(`/locations/${pendingDelete.id}`);
       notify({
         type: "success",
         title: "Ubicacion eliminada",

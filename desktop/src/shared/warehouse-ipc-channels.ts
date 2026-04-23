@@ -1,11 +1,15 @@
 export const WAREHOUSE_IPC_CHANNELS = {
+  dispatchProduct: "warehouse:dispatch",
   createProduct: "warehouse:createProduct",
   createStockMovement: "warehouse:createStockMovement",
   createWarehouse: "warehouse:createWarehouse",
+  deactivateWarehouse: "warehouse:deactivate",
   getProducts: "warehouse:getProducts",
   getStockMovements: "warehouse:getStockMovements",
   getWarehouses: "warehouse:getWarehouses",
   getWarehouseStock: "warehouse:getWarehouseStock",
   setWarehouseStock: "warehouse:setWarehouseStock",
+  transferStock: "warehouse:transferStock",
+  updateWarehouse: "warehouse:update",
   updateProductStock: "warehouse:updateProductStock",
 } as const;

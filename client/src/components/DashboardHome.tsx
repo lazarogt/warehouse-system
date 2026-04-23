@@ -3,7 +3,9 @@ import {
   type LowStockAlert,
   type StockMovement,
 } from "../../../shared/src";
+import { t, tUserRole } from "../i18n";
 import { useAuth } from "../auth/AuthProvider";
+import { useWarehouseContext } from "../context/WarehouseContext";
 import {
   Bar,
   BarChart,
@@ -40,6 +42,7 @@ const initialState: DashboardState = {
 export default function DashboardHome() {
   const [state, setState] = useState<DashboardState>(initialState);
   const { user } = useAuth();
+  const { selectedWarehouse, warehouseViewMode } = useWarehouseContext();
   const { getDashboardSnapshot, isOffline } = useDataProvider();
 
   useEffect(() => {
@@ -59,7 +62,7 @@ export default function DashboardHome() {
         setState({
           ...initialState,
           loading: false,
-          error: error instanceof Error ? error.message : "Unknown error",
+          error: error instanceof Error ? error.message : t("common.error"),
         });
       }
     };
@@ -88,8 +91,8 @@ export default function DashboardHome() {
     );
 
     return [
-      { name: "Entradas", value: totals.entry },
-      { name: "Salidas", value: totals.exit },
+      { name: t("dashboard.entries"), value: totals.entry },
+      { name: t("dashboard.exits"), value: totals.exit },
     ];
   }, [state.recentMovements]);
 
@@ -105,22 +108,22 @@ export default function DashboardHome() {
 
   const metricCards = [
     {
-      title: "Total de usuarios",
+      title: t("dashboard.totalUsers"),
       value: state.totalUsers,
       accent: "from-cyan-400/20 to-sky-500/10",
     },
     {
-      title: "Total de productos",
+      title: t("dashboard.totalProducts"),
       value: state.totalProducts,
       accent: "from-emerald-400/20 to-teal-500/10",
     },
     {
-      title: "Movimientos recientes",
+      title: t("dashboard.recentMovements"),
       value: state.recentMovements.length,
       accent: "from-orange-400/20 to-amber-500/10",
     },
     {
-      title: "Productos con stock bajo",
+      title: t("dashboard.lowStockTitle"),
       value: lowStockProducts.length,
       accent: "from-rose-400/20 to-orange-500/10",
     },
@@ -131,18 +134,19 @@ export default function DashboardHome() {
       <section className="grid gap-4 xl:grid-cols-[1.25fr,0.95fr]">
         <div className="rounded-[28px] border border-white/10 bg-white/5 p-6 shadow-panel backdrop-blur">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-orange-300">
-            Dashboard Home
+            {t("dashboard.metrics")}
           </p>
           <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">
-            Metricas clave del almacen
+            {t("dashboard.metricsTitle")}
           </h2>
-          <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">
-            Vista inicial para monitorear operacion, usuarios, productos y alertas de stock bajo
-            desde el panel administrativo.
+          <p className="mt-4 text-sm text-slate-300">
+            {warehouseViewMode === "selected" && selectedWarehouse
+              ? `${t("warehouse.active")}: ${selectedWarehouse.name}`
+              : t("dashboard.metricsSubtitle")}
           </p>
           {isOffline && (
             <div className="mt-4 inline-flex rounded-full border border-amber-300/20 bg-amber-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-amber-100">
-              Offline Mode
+              {t("common.offlineMode")}
             </div>
           )}
 
@@ -163,10 +167,10 @@ export default function DashboardHome() {
 
         <div className="rounded-[28px] border border-white/10 bg-slate-950/70 p-6 shadow-panel">
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300">
-            Sesion actual
+            {t("dashboard.currentSession")}
           </p>
 
-          {state.loading && <p className="mt-4 text-sm text-slate-300">Cargando datos del panel...</p>}
+          {state.loading ? <p className="mt-4 text-sm text-slate-300">{t("loading.content")}</p> : null}
 
           {!state.loading && state.error && (
             <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 p-4 text-sm text-rose-200">
@@ -192,12 +196,12 @@ export default function DashboardHome() {
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl bg-white/5 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Rol</p>
-                  <p className="mt-2 font-semibold text-white">{user.role}</p>
+                  <p className="text-xs uppercase tracking-[0.22em] text-slate-400">{t("dashboard.role")}</p>
+                  <p className="mt-2 font-semibold text-white">{tUserRole(user.role)}</p>
                 </div>
                 <div className="rounded-2xl bg-white/5 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Alertas</p>
-                  <p className="mt-2 font-semibold text-white">{lowStockProducts.length} activas</p>
+                  <p className="text-xs uppercase tracking-[0.22em] text-slate-400">{t("common.alerts")}</p>
+                  <p className="mt-2 font-semibold text-white">{lowStockProducts.length}</p>
                 </div>
               </div>
             </div>
@@ -210,9 +214,9 @@ export default function DashboardHome() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-[0.25em] text-slate-400">
-                Productos con mas stock
+                {t("dashboard.totalProducts")}
               </p>
-              <h3 className="mt-2 text-xl font-semibold text-white">Distribucion actual</h3>
+              <h3 className="mt-2 text-xl font-semibold text-white">{t("common.stock")}</h3>
             </div>
           </div>
 
@@ -237,8 +241,8 @@ export default function DashboardHome() {
         </article>
 
         <article className="rounded-[28px] border border-white/10 bg-slate-950/55 p-6 shadow-panel">
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Movimientos recientes</p>
-          <h3 className="mt-2 text-xl font-semibold text-white">Entradas vs salidas</h3>
+          <p className="text-xs uppercase tracking-[0.25em] text-slate-400">{t("dashboard.recentMovements")}</p>
+          <h3 className="mt-2 text-xl font-semibold text-white">{t("dashboard.movementBalance")}</h3>
 
           <div className="mt-6 h-72">
             <ResponsiveContainer width="100%" height="100%">
@@ -288,18 +292,18 @@ export default function DashboardHome() {
         <article className="rounded-[28px] border border-white/10 bg-gradient-to-br from-rose-500/15 to-orange-500/10 p-6 shadow-panel">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.25em] text-orange-200">Alertas</p>
-              <h3 className="mt-2 text-xl font-semibold text-white">Productos con stock bajo</h3>
+              <p className="text-xs uppercase tracking-[0.25em] text-orange-200">{t("common.alerts")}</p>
+              <h3 className="mt-2 text-xl font-semibold text-white">{t("dashboard.lowStockTitle")}</h3>
             </div>
             <span className="rounded-full bg-rose-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-rose-100">
-              Criticos
+              {t("app.lowStock")}
             </span>
           </div>
 
           <div className="mt-6 space-y-3">
             {lowStockProducts.length === 0 && !state.loading && (
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
-                No hay alertas de stock bajo por ahora.
+                {t("dashboard.noLowStock")}
               </div>
             )}
 
@@ -312,6 +316,11 @@ export default function DashboardHome() {
                   <div>
                     <p className="font-semibold text-white">{item.name}</p>
                     <p className="mt-1 text-sm text-slate-300">{item.categoryName}</p>
+                    {item.warehouseName ? (
+                      <p className="mt-1 text-xs uppercase tracking-[0.18em] text-cyan-200">
+                        {t("common.warehouse")}: {item.warehouseName}
+                      </p>
+                    ) : null}
                   </div>
                   <span className="rounded-full bg-rose-500/15 px-3 py-1 text-sm font-semibold text-rose-100">
                     {item.currentStock}
@@ -323,20 +332,20 @@ export default function DashboardHome() {
         </article>
 
         <article className="rounded-[28px] border border-white/10 bg-slate-950/55 p-6 shadow-panel">
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Ultimos registros</p>
-          <h3 className="mt-2 text-xl font-semibold text-white">Movimientos recientes</h3>
+          <p className="text-xs uppercase tracking-[0.25em] text-slate-400">{t("dashboard.latest")}</p>
+          <h3 className="mt-2 text-xl font-semibold text-white">{t("dashboard.recentMovements")}</h3>
 
           <div className="mt-6 overflow-hidden rounded-[24px] border border-white/10">
             <div className="grid grid-cols-[1.2fr,0.9fr,0.7fr,1fr] gap-3 bg-white/5 px-4 py-3 text-xs uppercase tracking-[0.22em] text-slate-400">
-              <span>Producto</span>
-              <span>Almacen</span>
-              <span>Tipo</span>
-              <span>Fecha</span>
+                <span>{t("warehouse.product")}</span>
+                <span>{t("common.warehouse")}</span>
+                <span>{t("common.type")}</span>
+                <span>{t("common.date")}</span>
             </div>
 
             <div className="divide-y divide-white/10">
               {state.recentMovements.length === 0 && !state.loading && (
-                <div className="px-4 py-5 text-sm text-slate-300">No hay movimientos registrados.</div>
+                <div className="px-4 py-5 text-sm text-slate-300">{t("dashboard.noMovements")}</div>
               )}
 
               {state.recentMovements.map((movement) => (
@@ -351,7 +360,7 @@ export default function DashboardHome() {
                       movement.type === "entry" ? "text-emerald-300" : "text-orange-300"
                     }
                   >
-                    {movement.type}
+                    {movement.type === "entry" ? t("dashboard.entries") : t("dashboard.exits")}
                   </span>
                   <span>{new Date(movement.movementDate).toLocaleDateString()}</span>
                 </div>

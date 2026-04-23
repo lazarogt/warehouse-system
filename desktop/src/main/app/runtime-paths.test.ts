@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import path from "node:path";
-import test from "node:test";
+import { test } from "vitest";
 import { getPackagedRendererDistPath, getPackagedRendererPath } from "./runtime-paths";
 
 test("getPackagedRendererPath resolves the bundled renderer relative to the compiled main process", () => {

@@ -114,6 +114,10 @@ Transferencias
 Ajustes
 Conteos cíclicos
 Configuración
+Convención UI:
+`client/src/i18n/es.ts` concentra el texto visible del frontend
+Usa `t("clave")` para etiquetas, botones, placeholders, avisos y mensajes de error del cliente
+La UI debe mantenerse en español completo, con copy corto y consistente
 🔐 Integridad de datos
 Soft delete global
 Transacciones en operaciones críticas
@@ -130,8 +134,18 @@ Health: /api/health
 DB: SQLite local o Docker volume
 🖥️ Desktop App (Electron)
 El módulo `desktop` agrega un shell nativo sobre el frontend React existente, sin modificar la lógica del backend.
+
+## Desktop Offline Mode
+
+- Totalmente funcional sin backend
+- Base de datos local SQLite
+- Arquitectura basada en IPC
+- Autenticación offline
+- Copias de seguridad automáticas
+
 Scripts disponibles desde la raíz del repositorio:
 `npm run dev:desktop`: levanta Vite en `http://localhost:5173`, compila Electron en watch y abre la ventana desktop
+`npm run qa:desktop`: inicia el flujo desktop para validación manual
 `npm run build:desktop`: genera el build de React y compila Electron
 `npm run start:desktop`: ejecuta Electron en modo producción cargando `client/dist`
 `npm run dist:desktop`: empaqueta instaladores desktop en `dist-electron`
@@ -140,6 +154,21 @@ Proceso de release documentado en [`desktop/docs/release.md`](desktop/docs/relea
 Instalación requerida:
 `npm install` en la raíz para `concurrently`
 `npm install` dentro de `desktop`
+
+## Run Desktop
+
+```bash
+npm run dev:desktop
+```
+
+## Notes
+
+- Los módulos nativos requieren rebuild:
+
+```bash
+npm run postinstall --prefix desktop
+```
+
 Flujo de desarrollo:
 `dev:desktop` espera a que Vite responda antes de abrir Electron
 Electron corre en una sola instancia y reutiliza la ventana existente si se intenta abrir otra
@@ -156,22 +185,32 @@ Solo en desarrollo se insertan datos seed de ejemplo para `products`, `stock_mov
 La base no se expone al renderer: queda encapsulada en servicios del main process listos para IPC futuro
 Arquitectura multi-almacén desktop:
 `warehouses` modela almacenes físicos
+`warehouses.is_active` aplica soft delete y preserva histórico
 `warehouse_stock` almacena existencias por `(warehouse_id, product_id)`
-`stock_movements` ahora registra `warehouse_id`
+`stock_movements` ahora registra `warehouse_id`, `reason` y `metadata` JSON
 `products.stock` se mantiene como stock agregado para compatibilidad con el catálogo actual
 UX operativo desktop:
 Selector global de almacén con selección persistida al reabrir la app
 Alta rápida de almacén
-Alta rápida de producto con cantidad inicial en el almacén seleccionado
-Panel rápido para fijar cantidad por producto dentro del almacén activo
+Edición y desactivación de almacenes desde Configuración sin recargar la vista
+Alta rápida de producto con cantidad inicial trazable en el almacén seleccionado
+Panel rápido para ajustar cantidad por producto dentro del almacén activo usando movimientos
+Modal rápido para transferir stock entre almacenes en menos de 5 campos
+Modal rápido de despacho con almacén activo preseleccionado, stock en tiempo real y validación de stock suficiente
+Exportación local en 1 clic de despachos, inventario por almacén y movimientos en PDF o Excel
+Si se desactiva el almacén activo, la app selecciona automáticamente otro almacén válido
 Resiliencia offline desktop:
 Sync opcional: si no hay backend, el motor local sigue funcionando y la sincronización solo se difiere
 Backups manuales y automáticos cada 30 minutos con rotación máxima de 10 archivos
 Chequeo `PRAGMA integrity_check` al arrancar con opción de restaurar un backup antes de abrir la ventana
 Renderer offline-first:
 `client/src/services/data-provider.ts` decide API vs IPC según disponibilidad del backend
-Badge global `Offline Mode` cuando el backend no responde
+Badge global `Modo sin conexión` cuando el backend no responde
 Productos, stock, movimientos y alertas usan fallback local por IPC sin tumbar la UI
+El scope visual por defecto es `Este almacén`, usando `selectedWarehouseId`; el toggle `Todos` habilita la vista global multi-almacén
+Las consultas scoped duplican filas por almacén cuando el usuario cambia a `Todos`, y la tabla de productos añade la columna `Almacén`
+Despachos desktop registran un movimiento `OUT` con `reason = dispatch` y `metadata = { customer, notes }`
+Las exportaciones desktop usan `pdfkit`, `exceljs` y `dialog.showSaveDialog` sin exponer filesystem al renderer
 👨‍💻 Autor
 
 Lázaro González Torres

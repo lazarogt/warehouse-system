@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { USER_ROLES, USER_STATUSES, type CreateUserInput, type UpdateUserInput, type User } from "../../../shared/src";
+import { t, tUserRole, tUserStatus } from "../i18n";
 import Modal from "./Modal";
 import MotionButton from "./MotionButton";
 
@@ -54,7 +55,7 @@ export default function UserForm({
   }, [initialUser, mode]);
 
   const title = useMemo(() => {
-    return mode === "create" ? "Crear usuario" : "Editar usuario";
+    return mode === "create" ? t("users.create") : t("users.edit");
   }, [mode]);
   const titleId = "user-form-title";
 
@@ -62,23 +63,23 @@ export default function UserForm({
     const nextErrors: FormErrors = {};
 
     if (!values.name.trim()) {
-      nextErrors.name = "El nombre es obligatorio.";
+      nextErrors.name = t("users.nameRequired");
     }
 
     if (!values.username.trim()) {
-      nextErrors.username = "El username es obligatorio.";
+      nextErrors.username = t("users.usernameRequired");
     } else if (!USERNAME_PATTERN.test(values.username.trim().toLowerCase())) {
-      nextErrors.username = "Usa 3-40 caracteres con letras, numeros, punto, guion o guion bajo.";
+      nextErrors.username = t("users.usernameHelp");
     }
 
     if (!values.email.trim()) {
-      nextErrors.email = "El email es obligatorio.";
+      nextErrors.email = t("users.emailRequired");
     } else if (!EMAIL_PATTERN.test(values.email.trim().toLowerCase())) {
-      nextErrors.email = "Ingresa un email valido.";
+      nextErrors.email = t("users.emailInvalid");
     }
 
     if (mode === "create" && values.password.length < 8) {
-      nextErrors.password = "La contrasena debe tener al menos 8 caracteres.";
+      nextErrors.password = t("users.passwordLength");
     }
 
     setErrors(nextErrors);
@@ -118,44 +119,44 @@ export default function UserForm({
       <section className="rounded-[28px] border border-white/10 bg-slate-950/95 p-6 shadow-panel">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">User Form</p>
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">{t("users.form")}</p>
             <h3 id={titleId} className="mt-2 text-2xl font-semibold text-white">
               {title}
             </h3>
           </div>
 
           <MotionButton
-            aria-label="Cerrar formulario de usuario"
+            aria-label={t("common.cancel")}
             onClick={onCancel}
             className="min-h-[40px] rounded-2xl border border-white/10 px-4 text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white"
           >
-            Cancelar
+            {t("common.cancel")}
           </MotionButton>
         </div>
 
         <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
           <div className="grid gap-5 xl:grid-cols-2">
             <label className="space-y-2">
-              <span className="text-sm font-medium text-slate-200">Nombre</span>
+              <span className="text-sm font-medium text-slate-200">{t("common.name")}</span>
               <input
-                aria-label="Nombre del usuario"
+                aria-label={t("common.name")}
                 autoFocus
                 value={values.name}
                 onChange={(event) => setValues((current) => ({ ...current, name: event.target.value }))}
                 className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-cyan-300"
-                placeholder="Nombre completo"
+                placeholder={t("common.name")}
               />
               {errors.name && <span className="text-sm text-rose-300">{errors.name}</span>}
             </label>
 
             <label className="space-y-2">
-              <span className="text-sm font-medium text-slate-200">Username</span>
+              <span className="text-sm font-medium text-slate-200">{t("common.username")}</span>
               <input
-                aria-label="Username del usuario"
+                aria-label={t("common.username")}
                 value={values.username}
                 onChange={(event) => setValues((current) => ({ ...current, username: event.target.value }))}
                 className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-cyan-300"
-                placeholder="usuario"
+                placeholder={t("common.username")}
               />
               {errors.username && <span className="text-sm text-rose-300">{errors.username}</span>}
             </label>
@@ -163,9 +164,9 @@ export default function UserForm({
 
           <div className="grid gap-5 xl:grid-cols-2">
             <label className="space-y-2">
-              <span className="text-sm font-medium text-slate-200">Email</span>
+              <span className="text-sm font-medium text-slate-200">{t("common.email")}</span>
               <input
-                aria-label="Email del usuario"
+                aria-label={t("common.email")}
                 value={values.email}
                 onChange={(event) => setValues((current) => ({ ...current, email: event.target.value }))}
                 className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-cyan-300"
@@ -176,9 +177,9 @@ export default function UserForm({
             </label>
 
             <label className="space-y-2">
-              <span className="text-sm font-medium text-slate-200">Rol</span>
+              <span className="text-sm font-medium text-slate-200">{t("users.role")}</span>
               <select
-                aria-label="Rol del usuario"
+                aria-label={t("users.role")}
                 value={values.role}
                 disabled={!canManageRoles}
                 onChange={(event) =>
@@ -191,16 +192,16 @@ export default function UserForm({
               >
                 {USER_ROLES.map((role) => (
                   <option key={role} value={role} className="bg-slate-900">
-                    {role}
+                    {tUserRole(role)}
                   </option>
                 ))}
               </select>
             </label>
 
             <label className="space-y-2">
-              <span className="text-sm font-medium text-slate-200">Estado</span>
+              <span className="text-sm font-medium text-slate-200">{t("users.status")}</span>
               <select
-                aria-label="Estado del usuario"
+                aria-label={t("users.status")}
                 value={values.status}
                 onChange={(event) =>
                   setValues((current) => ({
@@ -212,7 +213,7 @@ export default function UserForm({
               >
                 {USER_STATUSES.map((status) => (
                   <option key={status} value={status} className="bg-slate-900">
-                    {status}
+                    {tUserStatus(status)}
                   </option>
                 ))}
               </select>
@@ -221,9 +222,9 @@ export default function UserForm({
 
           {mode === "create" && (
             <label className="space-y-2">
-              <span className="text-sm font-medium text-slate-200">Contrasena</span>
+              <span className="text-sm font-medium text-slate-200">{t("common.password")}</span>
               <input
-                aria-label="Contrasena del usuario"
+                aria-label={t("common.password")}
                 value={values.password}
                 onChange={(event) =>
                   setValues((current) => ({
@@ -232,7 +233,7 @@ export default function UserForm({
                   }))
                 }
                 className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-cyan-300"
-                placeholder="Minimo 8 caracteres"
+                placeholder={t("auth.newPasswordLength")}
                 type="password"
               />
               {errors.password && <span className="text-sm text-rose-300">{errors.password}</span>}
@@ -241,19 +242,15 @@ export default function UserForm({
 
           <div className="flex flex-wrap items-center gap-3 pt-2">
             <MotionButton
-              aria-label={mode === "create" ? "Crear usuario" : "Guardar cambios del usuario"}
+              aria-label={mode === "create" ? t("users.create") : t("common.save")}
               type="submit"
               disabled={saving}
               className="min-h-[48px] rounded-2xl bg-orange-500 px-5 text-sm font-semibold text-white transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {saving ? "Guardando..." : mode === "create" ? "Crear usuario" : "Guardar cambios"}
+              {saving ? t("auth.savingPassword") : mode === "create" ? t("users.create") : t("common.save")}
             </MotionButton>
 
-            <p className="text-sm leading-6 text-slate-300">
-              {mode === "create"
-                ? "El alta de usuarios esta reservada al admin, con rol y estado definidos desde el panel."
-                : "Puedes actualizar username, nombre, email, rol y estado del usuario."}
-            </p>
+            <p className="text-sm leading-6 text-slate-300">{mode === "create" ? t("users.listSubtitle") : t("users.edit")}</p>
           </div>
         </form>
       </section>

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { BACKUP_IPC_CHANNELS } from "../../shared/backup-ipc-channels";
 import { registerBackupIpcHandlers } from "./backup-ipc";
 

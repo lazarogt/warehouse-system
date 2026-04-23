@@ -26,6 +26,13 @@ type QuickStockFormValues = {
   search: string;
 };
 
+type TransferFormValues = {
+  productId: string;
+  quantity: string;
+  sourceId: string;
+  targetId: string;
+};
+
 const initialWarehouseValues: QuickWarehouseFormValues = {
   name: "",
   location: "",
@@ -41,6 +48,13 @@ const initialStockValues: QuickStockFormValues = {
   productId: "",
   quantity: "0",
   search: "",
+};
+
+const initialTransferValues: TransferFormValues = {
+  productId: "",
+  quantity: "1",
+  sourceId: "",
+  targetId: "",
 };
 
 function formatWarehouseLabel(location: string) {
@@ -63,17 +77,22 @@ export default function WarehouseWorkspaceBar() {
   const [warehouseModalOpen, setWarehouseModalOpen] = useState(false);
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [stockPanelOpen, setStockPanelOpen] = useState(false);
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [warehouseValues, setWarehouseValues] =
     useState<QuickWarehouseFormValues>(initialWarehouseValues);
   const [productValues, setProductValues] = useState<QuickProductFormValues>(initialProductValues);
   const [stockValues, setStockValues] = useState<QuickStockFormValues>(initialStockValues);
+  const [transferValues, setTransferValues] = useState<TransferFormValues>(initialTransferValues);
   const [savingWarehouse, setSavingWarehouse] = useState(false);
   const [savingProduct, setSavingProduct] = useState(false);
   const [savingStock, setSavingStock] = useState(false);
+  const [savingTransfer, setSavingTransfer] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [productsLoading, setProductsLoading] = useState(false);
   const [currentStock, setCurrentStock] = useState<number | null>(null);
   const [currentStockLoading, setCurrentStockLoading] = useState(false);
+  const [transferSourceStock, setTransferSourceStock] = useState<number | null>(null);
+  const [transferSourceStockLoading, setTransferSourceStockLoading] = useState(false);
 
   const loadProducts = useCallback(async () => {
     const warehouseApi = window.api?.warehouse;
@@ -103,7 +122,7 @@ export default function WarehouseWorkspaceBar() {
   }, []);
 
   useEffect(() => {
-    if (!stockPanelOpen) {
+    if (!stockPanelOpen && !transferModalOpen) {
       return;
     }
 
@@ -114,7 +133,7 @@ export default function WarehouseWorkspaceBar() {
         message: loadError instanceof Error ? loadError.message : "Intentalo de nuevo.",
       });
     });
-  }, [loadProducts, notify, stockPanelOpen]);
+  }, [loadProducts, notify, stockPanelOpen, transferModalOpen]);
 
   useEffect(() => {
     if (!stockPanelOpen || !selectedWarehouseId || !stockValues.productId) {
@@ -169,6 +188,59 @@ export default function WarehouseWorkspaceBar() {
     };
   }, [selectedWarehouseId, stockPanelOpen, stockValues.productId]);
 
+  useEffect(() => {
+    if (!transferModalOpen || !transferValues.sourceId || !transferValues.productId) {
+      setTransferSourceStock(null);
+      setTransferSourceStockLoading(false);
+      return;
+    }
+
+    const warehouseApi = window.api?.warehouse;
+
+    if (!warehouseApi) {
+      setTransferSourceStock(null);
+      setTransferSourceStockLoading(false);
+      return;
+    }
+
+    let active = true;
+
+    const loadTransferSourceStock = async () => {
+      setTransferSourceStockLoading(true);
+
+      try {
+        const response = await warehouseApi.getWarehouseStock({
+          warehouseId: Number(transferValues.sourceId),
+          productId: Number(transferValues.productId),
+        });
+
+        if (!active) {
+          return;
+        }
+
+        if (!response.success) {
+          throw new Error(response.error.message || "No se pudo consultar la cantidad.");
+        }
+
+        setTransferSourceStock(response.data.quantity);
+      } catch {
+        if (active) {
+          setTransferSourceStock(0);
+        }
+      } finally {
+        if (active) {
+          setTransferSourceStockLoading(false);
+        }
+      }
+    };
+
+    void loadTransferSourceStock();
+
+    return () => {
+      active = false;
+    };
+  }, [transferModalOpen, transferValues.productId, transferValues.sourceId]);
+
   const filteredProducts = useMemo(() => {
     const query = stockValues.search.trim().toLowerCase();
 
@@ -187,6 +259,10 @@ export default function WarehouseWorkspaceBar() {
   const selectedProduct = useMemo(() => {
     return products.find((product) => product.id === Number(stockValues.productId)) ?? null;
   }, [products, stockValues.productId]);
+
+  const selectedTransferProduct = useMemo(() => {
+    return products.find((product) => product.id === Number(transferValues.productId)) ?? null;
+  }, [products, transferValues.productId]);
 
   const handleWarehouseSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -271,7 +347,7 @@ export default function WarehouseWorkspaceBar() {
     if (!warehouseApi) {
       notify({
         type: "error",
-        title: "Solo disponible en desktop",
+        title: "Solo disponible en escritorio",
         message: "Esta accion usa la app de escritorio.",
       });
       return;
@@ -292,14 +368,19 @@ export default function WarehouseWorkspaceBar() {
         throw new Error(createResponse.error.message || "No se pudo crear el producto.");
       }
 
-      const stockResponse = await warehouseApi.setWarehouseStock({
-        warehouseId: selectedWarehouseId,
-        productId: createResponse.data.id,
-        quantity: initialStock,
-      });
+      if (initialStock > 0) {
+        const stockResponse = await warehouseApi.createStockMovement({
+          warehouseId: selectedWarehouseId,
+          productId: createResponse.data.id,
+          quantity: initialStock,
+          type: "in",
+        });
 
-      if (!stockResponse.success) {
-        throw new Error(stockResponse.error.message || "No se pudo guardar la cantidad inicial.");
+        if (!stockResponse.success) {
+          throw new Error(
+            stockResponse.error.message || "No se pudo guardar la cantidad inicial.",
+          );
+        }
       }
 
       setProductValues(initialProductValues);
@@ -353,7 +434,7 @@ export default function WarehouseWorkspaceBar() {
     if (!warehouseApi) {
       notify({
         type: "error",
-        title: "Solo disponible en desktop",
+        title: "Solo disponible en escritorio",
         message: "Esta accion usa la app de escritorio.",
       });
       return;
@@ -362,21 +443,27 @@ export default function WarehouseWorkspaceBar() {
     setSavingStock(true);
 
     try {
-      const response = await warehouseApi.setWarehouseStock({
-        warehouseId: selectedWarehouseId,
-        productId: Number(stockValues.productId),
-        quantity,
-      });
+      const currentQuantity = currentStock ?? 0;
+      const difference = quantity - currentQuantity;
 
-      if (!response.success) {
-        throw new Error(response.error.message || "No se pudo actualizar la cantidad.");
+      if (difference !== 0) {
+        const response = await warehouseApi.createStockMovement({
+          warehouseId: selectedWarehouseId,
+          productId: Number(stockValues.productId),
+          quantity: Math.abs(difference),
+          type: difference > 0 ? "in" : "out",
+        });
+
+        if (!response.success) {
+          throw new Error(response.error.message || "No se pudo actualizar la cantidad.");
+        }
       }
 
-      setCurrentStock(response.data.quantity);
+      setCurrentStock(quantity);
       notify({
         type: "success",
         title: "Cantidad actualizada",
-        message: `${selectedProduct?.name ?? "El producto"} quedo en ${response.data.quantity} unidades.`,
+        message: `${selectedProduct?.name ?? "El producto"} quedo en ${quantity} unidades.`,
       });
     } catch (submitError) {
       notify({
@@ -398,6 +485,117 @@ export default function WarehouseWorkspaceBar() {
         title: "No se pudo actualizar",
         message: refreshError instanceof Error ? refreshError.message : "Intentalo de nuevo.",
       });
+    }
+  };
+
+  const handleOpenTransferModal = () => {
+    if (!selectedWarehouseId) {
+      return;
+    }
+
+    const defaultTargetWarehouse = availableWarehouses.find(
+      (warehouse) => warehouse.id !== selectedWarehouseId,
+    );
+
+    setTransferValues({
+      ...initialTransferValues,
+      sourceId: String(selectedWarehouseId),
+      targetId: defaultTargetWarehouse ? String(defaultTargetWarehouse.id) : "",
+    });
+    setTransferSourceStock(null);
+    setTransferModalOpen(true);
+  };
+
+  const handleTransferSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (savingTransfer) {
+      return;
+    }
+
+    if (
+      !transferValues.sourceId ||
+      !transferValues.targetId ||
+      !transferValues.productId ||
+      !transferValues.quantity
+    ) {
+      notify({
+        type: "error",
+        title: "Completa los datos",
+        message: "Elige origen, destino, producto y cantidad.",
+      });
+      return;
+    }
+
+    const quantity = Number(transferValues.quantity);
+
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      notify({
+        type: "error",
+        title: "Cantidad invalida",
+        message: "La cantidad debe ser mayor que 0.",
+      });
+      return;
+    }
+
+    if (transferValues.sourceId === transferValues.targetId) {
+      notify({
+        type: "error",
+        title: "Destino invalido",
+        message: "Elige un destino distinto.",
+      });
+      return;
+    }
+
+    if (transferSourceStock !== null && quantity > transferSourceStock) {
+      notify({
+        type: "error",
+        title: "Stock insuficiente",
+        message: "La cantidad supera lo disponible en origen.",
+      });
+      return;
+    }
+
+    const warehouseApi = window.api?.warehouse;
+
+    if (!warehouseApi) {
+      notify({
+        type: "error",
+        title: "Solo disponible en escritorio",
+        message: "Esta accion usa la app de escritorio.",
+      });
+      return;
+    }
+
+    setSavingTransfer(true);
+
+    try {
+      const response = await warehouseApi.transferStock({
+        sourceId: Number(transferValues.sourceId),
+        targetId: Number(transferValues.targetId),
+        productId: Number(transferValues.productId),
+        quantity,
+      });
+
+      if (!response.success) {
+        throw new Error(response.error.message || "No se pudo transferir.");
+      }
+
+      setTransferValues(initialTransferValues);
+      setTransferSourceStock(null);
+      setTransferModalOpen(false);
+      notify({
+        type: "success",
+        title: "Transferencia realizada",
+      });
+    } catch (transferError) {
+      notify({
+        type: "error",
+        title: "No se pudo transferir",
+        message: transferError instanceof Error ? transferError.message : "Intentalo de nuevo.",
+      });
+    } finally {
+      setSavingTransfer(false);
     }
   };
 
@@ -447,6 +645,14 @@ export default function WarehouseWorkspaceBar() {
             >
               Actualizar cantidad
             </MotionButton>
+            <MotionButton
+              aria-label="Transferir entre almacenes"
+              onClick={handleOpenTransferModal}
+              disabled={!selectedWarehouseId || availableWarehouses.length < 2}
+              className="min-h-[48px] rounded-2xl border border-sky-300/20 bg-sky-500/10 px-5 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Transferir
+            </MotionButton>
           </div>
         </div>
 
@@ -454,7 +660,7 @@ export default function WarehouseWorkspaceBar() {
           <article className="panel-subtle p-5">
             <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
               <label className="block flex-1 space-y-2">
-                <span className="toolbar-label">Almacen activo</span>
+                <span className="toolbar-label">Almacén activo</span>
                 <select
                   value={selectedWarehouseId ?? ""}
                   disabled={loading || availableWarehouses.length === 0}
@@ -677,6 +883,145 @@ export default function WarehouseWorkspaceBar() {
                 className="min-h-[48px] rounded-2xl bg-emerald-500 px-5 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {savingProduct ? "Guardando..." : "Guardar producto"}
+              </MotionButton>
+            </div>
+          </form>
+        </div>
+      </Modal>
+
+      <Modal
+        open={transferModalOpen}
+        onClose={() => {
+          if (!savingTransfer) {
+            setTransferModalOpen(false);
+          }
+        }}
+        titleId="transfer-stock-title"
+      >
+        <div className="rounded-[30px] border border-white/10 bg-slate-950 p-6 shadow-panel sm:p-8">
+          <p className="toolbar-label text-sky-200">Transferencia</p>
+          <h3 id="transfer-stock-title" className="mt-2 text-2xl font-semibold text-white">
+            Transferir
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            Mueve stock entre almacenes en un solo paso.
+          </p>
+
+          <form className="mt-6 space-y-5" onSubmit={handleTransferSubmit}>
+            <label className="block space-y-2">
+              <span className="field-label">Origen</span>
+              <select
+                autoFocus
+                value={transferValues.sourceId}
+                onChange={(event) =>
+                  setTransferValues((current) => ({
+                    ...current,
+                    sourceId: event.target.value,
+                    targetId:
+                      current.targetId === event.target.value ? "" : current.targetId,
+                  }))
+                }
+                className="toolbar-field w-full"
+              >
+                <option value="" className="bg-slate-900">
+                  Selecciona origen
+                </option>
+                {availableWarehouses
+                  .filter((warehouse) => String(warehouse.id) !== transferValues.sourceId)
+                  .map((warehouse) => (
+                    <option key={warehouse.id} value={warehouse.id} className="bg-slate-900">
+                      {warehouse.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="field-label">Destino</span>
+              <select
+                value={transferValues.targetId}
+                onChange={(event) =>
+                  setTransferValues((current) => ({ ...current, targetId: event.target.value }))
+                }
+                className="toolbar-field w-full"
+              >
+                <option value="" className="bg-slate-900">
+                  Selecciona destino
+                </option>
+                {availableWarehouses.map((warehouse) => (
+                  <option key={warehouse.id} value={warehouse.id} className="bg-slate-900">
+                    {warehouse.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="field-label">Producto</span>
+              <select
+                value={transferValues.productId}
+                disabled={productsLoading || products.length === 0}
+                onChange={(event) =>
+                  setTransferValues((current) => ({ ...current, productId: event.target.value }))
+                }
+                className="toolbar-field w-full disabled:opacity-60"
+              >
+                <option value="" className="bg-slate-900">
+                  {productsLoading
+                    ? "Cargando productos..."
+                    : products.length === 0
+                      ? "No hay productos"
+                      : "Selecciona producto"}
+                </option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id} className="bg-slate-900">
+                    {product.name} · {product.sku}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block space-y-2">
+              <span className="field-label">Cantidad</span>
+              <input
+                value={transferValues.quantity}
+                onChange={(event) =>
+                  setTransferValues((current) => ({ ...current, quantity: event.target.value }))
+                }
+                className="toolbar-field w-full"
+                inputMode="numeric"
+                min="1"
+                step="1"
+                type="number"
+              />
+            </label>
+
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-4">
+              <p className="toolbar-label">Disponible</p>
+              <p className="mt-2 text-2xl font-semibold text-white">
+                {transferSourceStockLoading ? "Consultando..." : transferSourceStock ?? "--"}
+              </p>
+              <p className="mt-2 text-sm text-slate-400">
+                {selectedTransferProduct
+                  ? `${selectedTransferProduct.name} en el origen.`
+                  : "Selecciona un producto para ver lo disponible."}
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-white/10 pt-5 sm:flex-row sm:justify-end">
+              <MotionButton
+                type="button"
+                onClick={() => setTransferModalOpen(false)}
+                className="min-h-[48px] rounded-2xl border border-white/10 bg-white/5 px-5 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+              >
+                Cancelar
+              </MotionButton>
+              <MotionButton
+                type="submit"
+                disabled={savingTransfer}
+                className="min-h-[48px] rounded-2xl bg-sky-500 px-5 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingTransfer ? "Guardando..." : "Transferir"}
               </MotionButton>
             </div>
           </form>

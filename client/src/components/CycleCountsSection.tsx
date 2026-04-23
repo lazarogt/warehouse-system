@@ -9,8 +9,8 @@ import type {
   WarehouseLocation,
 } from "../../../shared/src";
 import { useAuth } from "../auth/AuthProvider";
-import { createApiClient } from "../lib/api";
 import { safeArray } from "../lib/format";
+import { useDataProvider } from "../services/data-provider";
 import ConfirmDialog from "./ConfirmDialog";
 import MotionButton from "./MotionButton";
 import SectionLoader from "./SectionLoader";
@@ -41,7 +41,7 @@ const initialState: CycleCountsState = {
 };
 
 export default function CycleCountsSection({ apiBaseUrl }: CycleCountsSectionProps) {
-  const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
+  const { http } = useDataProvider();
   const { user: currentUser } = useAuth();
   const { notify } = useToast();
   const [state, setState] = useState<CycleCountsState>(initialState);
@@ -60,10 +60,10 @@ export default function CycleCountsSection({ apiBaseUrl }: CycleCountsSectionPro
   const loadData = useCallback(async () => {
     try {
       const [warehouses, locations, products, counts] = await Promise.all([
-        api.get<Warehouse[]>("/warehouses"),
-        api.get<WarehouseLocation[]>("/locations"),
-        api.get<ProductListResponse>("/products?page=1&pageSize=100"),
-        api.get<CycleCount[]>("/cycle-counts"),
+        http.get<Warehouse[]>("/warehouses"),
+        http.get<WarehouseLocation[]>("/locations"),
+        http.get<ProductListResponse>("/products?page=1&pageSize=100"),
+        http.get<CycleCount[]>("/cycle-counts"),
       ]);
 
       setState({
@@ -86,7 +86,7 @@ export default function CycleCountsSection({ apiBaseUrl }: CycleCountsSectionPro
         error: error instanceof Error ? error.message : "No se pudieron cargar los conteos.",
       }));
     }
-  }, [api, selectedCountId]);
+  }, [http, selectedCountId]);
 
   useEffect(() => {
     void loadData();
@@ -134,7 +134,7 @@ export default function CycleCountsSection({ apiBaseUrl }: CycleCountsSectionPro
     };
 
     try {
-      const created = await api.post<CycleCount>("/cycle-counts", payload);
+      const created = await http.post<CycleCount>("/cycle-counts", payload);
       setCreateForm({ warehouseId: "", warehouseLocationId: "", notes: "" });
       setSelectedCountId(created.id);
       notify({
@@ -164,7 +164,7 @@ export default function CycleCountsSection({ apiBaseUrl }: CycleCountsSectionPro
     setState((current) => ({ ...current, saving: true, error: null }));
 
     try {
-      await api.post(`/cycle-counts/${selectedCount.id}/items`, {
+      await http.post(`/cycle-counts/${selectedCount.id}/items`, {
         productId: Number(newItemProductId),
       });
       setNewItemProductId("");
@@ -199,7 +199,7 @@ export default function CycleCountsSection({ apiBaseUrl }: CycleCountsSectionPro
     setState((current) => ({ ...current, saving: true, error: null }));
 
     try {
-      await api.patch(`/cycle-counts/${selectedCount.id}/items/${item.id}`, {
+      await http.patch(`/cycle-counts/${selectedCount.id}/items/${item.id}`, {
         countedQuantity,
         resolved: countedQuantity === item.expectedQuantity,
       });
@@ -230,11 +230,11 @@ export default function CycleCountsSection({ apiBaseUrl }: CycleCountsSectionPro
 
     try {
       if (pendingAction.action === "complete") {
-        await api.patch(`/cycle-counts/${pendingAction.count.id}/complete`, {
+        await http.patch(`/cycle-counts/${pendingAction.count.id}/complete`, {
           applyAdjustments: true,
         });
       } else {
-        await api.patch(`/cycle-counts/${pendingAction.count.id}/${pendingAction.action}`, {});
+        await http.patch(`/cycle-counts/${pendingAction.count.id}/${pendingAction.action}`, {});
       }
 
       notify({

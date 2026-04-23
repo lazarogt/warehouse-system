@@ -8,10 +8,12 @@ import type {
   StockLevel,
 } from "../../../shared/src";
 import { useAuth } from "../auth/AuthProvider";
-import { createApiClient, getErrorMessage, saveDownloadedFile } from "../lib/api";
+import { getErrorMessage, saveDownloadedFile } from "../lib/api";
 import { safeArray, safeCurrency, safeDateTime, safeInteger, safeText } from "../lib/format";
 import { triggerAlertsRefresh } from "../utils/alerts";
+import { useDataProvider } from "../services/data-provider";
 import MotionButton from "./MotionButton";
+import DesktopDispatchSection from "./DesktopDispatchSection";
 import SectionLoader from "./SectionLoader";
 import SectionNotice from "./SectionNotice";
 import { useToast } from "./ToastProvider";
@@ -77,7 +79,11 @@ const createInitialLine = (): DispatchLineForm => ({
 });
 
 export default function DispatchSection({ apiBaseUrl }: DispatchSectionProps) {
-  const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
+  if (typeof window !== "undefined" && window.api?.warehouse) {
+    return <DesktopDispatchSection />;
+  }
+
+  const { http } = useDataProvider();
   const { user: currentUser } = useAuth();
   const { notify } = useToast();
   const [state, setState] = useState<DispatchSectionState>(initialState);
@@ -93,9 +99,9 @@ export default function DispatchSection({ apiBaseUrl }: DispatchSectionProps) {
   const loadData = useCallback(async () => {
     try {
       const [productsResponse, stock, dispatches] = await Promise.all([
-        api.get<ProductListResponse>("/products?page=1&pageSize=200"),
-        api.get<StockLevel[]>("/inventory/stock"),
-        api.get<Dispatch[]>("/dispatches"),
+        http.get<ProductListResponse>("/products?page=1&pageSize=200"),
+        http.get<StockLevel[]>("/inventory/stock"),
+        http.get<Dispatch[]>("/dispatches"),
       ]);
 
       setState((current) => ({
@@ -115,7 +121,7 @@ export default function DispatchSection({ apiBaseUrl }: DispatchSectionProps) {
         error: message,
       }));
     }
-  }, [api]);
+  }, [http]);
 
   useEffect(() => {
     void loadData();
@@ -314,7 +320,7 @@ export default function DispatchSection({ apiBaseUrl }: DispatchSectionProps) {
       setState((current) => ({ ...current, saving: true, error: null }));
 
       try {
-        const createdDispatch = await api.post<Dispatch>("/dispatches", payload);
+        const createdDispatch = await http.post<Dispatch>("/dispatches", payload);
         setLastDispatch(createdDispatch);
         resetForm();
         await loadData();
@@ -342,7 +348,7 @@ export default function DispatchSection({ apiBaseUrl }: DispatchSectionProps) {
 
       setState((current) => ({ ...current, saving: false }));
     },
-    [api, formValues, lineViews, loadData, notify, resetForm, state.saving, validateForm],
+    [formValues, http, lineViews, loadData, notify, resetForm, state.saving, validateForm],
   );
 
   const handleExport = useCallback(
@@ -354,7 +360,7 @@ export default function DispatchSection({ apiBaseUrl }: DispatchSectionProps) {
       setExporting({ dispatchId, format });
 
       try {
-        const file = await api.download(`/dispatches/${dispatchId}/export?format=${format}`);
+        const file = await http.download(`/dispatches/${dispatchId}/export?format=${format}`);
         saveDownloadedFile(file);
         notify({
           type: "success",
@@ -371,7 +377,7 @@ export default function DispatchSection({ apiBaseUrl }: DispatchSectionProps) {
         setExporting(null);
       }
     },
-    [api, exporting, notify],
+    [exporting, http, notify],
   );
 
   if (state.loading) {

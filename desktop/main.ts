@@ -16,8 +16,10 @@ import {
   type DesktopDatabaseRuntime,
 } from "./src/main/db/init";
 import { registerBackupIpcHandlers } from "./src/main/ipc/backup-ipc";
+import { registerExportIpcHandlers } from "./src/main/ipc/export-ipc";
 import { registerWarehouseIpcHandlers } from "./src/main/ipc/warehouse-ipc";
 import { registerWarehouseSyncIpcHandlers } from "./src/main/ipc/warehouse-sync-ipc";
+import { createDesktopExportService } from "./src/main/services/export-service";
 import {
   createSyncAwareWarehouseDataService,
   createWarehouseSyncService,
@@ -364,12 +366,18 @@ if (!hasSingleInstanceLock) {
       },
       userDataPath: app.getPath("userData"),
     });
+    const warehouseDataService = createSyncAwareWarehouseDataService(
+      desktopDatabaseRuntime.services.warehouseData,
+      warehouseSyncService,
+    );
 
     registerWarehouseIpcHandlers({
-      warehouseDataService: createSyncAwareWarehouseDataService(
-        desktopDatabaseRuntime.services.warehouseData,
-        warehouseSyncService,
-      ),
+      warehouseDataService,
+    });
+    registerExportIpcHandlers({
+      exportService: createDesktopExportService({
+        warehouseDataService,
+      }),
     });
     registerWarehouseSyncIpcHandlers({
       syncService: warehouseSyncService,

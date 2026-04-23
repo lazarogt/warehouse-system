@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import { test } from "vitest";
 import { createDesktopDatabase } from "./database";
 import { initializeDesktopDatabase } from "./init";
 import { DATABASE_SCHEMA_VERSION } from "./schema";
@@ -96,7 +96,7 @@ test("recordStockMovement prevents negative stock", () => {
           }),
         (error) => {
           assert.equal(error instanceof DatabaseValidationError, true);
-          assert.match((error as Error).message, /Stock cannot become negative/);
+          assert.match((error as Error).message, /stock no puede quedar negativo/i);
           return true;
         },
       );
@@ -167,7 +167,10 @@ test("initializeDesktopDatabase migrates v1 data into the default warehouse safe
     });
 
     try {
-      assert.equal(runtime.database.pragma<number>("user_version", { simple: true }), 2);
+      assert.equal(
+        runtime.database.pragma<number>("user_version", { simple: true }),
+        DATABASE_SCHEMA_VERSION,
+      );
       const warehouses = runtime.services.warehouseData.listWarehouses();
       assert.equal(warehouses.length, 1);
 

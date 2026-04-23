@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { AuthResponse, ChangePasswordInput, User } from "../../../shared/src";
-import { createApiClient } from "../lib/api";
+import { t } from "../i18n";
+import { useDataProvider } from "../services/data-provider";
 import MotionButton from "./MotionButton";
 import { useToast } from "./ToastProvider";
 
@@ -19,7 +20,7 @@ export default function ChangePasswordScreen({
   onPasswordChanged,
   onLogout,
 }: ChangePasswordScreenProps) {
-  const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
+  const { http } = useDataProvider();
   const { notify } = useToast();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -31,19 +32,19 @@ export default function ChangePasswordScreen({
     const nextErrors: FormErrors = {};
 
     if (!currentPassword) {
-      nextErrors.currentPassword = "La contraseña actual es obligatoria.";
+      nextErrors.currentPassword = t("auth.currentPasswordRequired");
     }
 
     if (newPassword.length < 8) {
-      nextErrors.newPassword = "La nueva contraseña debe tener al menos 8 caracteres.";
+      nextErrors.newPassword = t("auth.newPasswordLength");
     }
 
     if (newPassword === currentPassword) {
-      nextErrors.newPassword = "La nueva contraseña debe ser distinta a la actual.";
+      nextErrors.newPassword = t("auth.newPasswordDifferent");
     }
 
     if (confirmPassword !== newPassword) {
-      nextErrors.confirmPassword = "La confirmación no coincide.";
+      nextErrors.confirmPassword = t("auth.passwordMismatch");
     }
 
     setErrors(nextErrors);
@@ -60,22 +61,22 @@ export default function ChangePasswordScreen({
     setSaving(true);
 
     try {
-      const response = await api.post<AuthResponse>("/auth/change-password", {
+      const response = await http.post<AuthResponse>("/auth/change-password", {
         currentPassword,
         newPassword,
       } satisfies ChangePasswordInput);
 
       notify({
         type: "success",
-        title: "Contraseña actualizada",
-        message: "Ya puedes continuar al dashboard.",
+        title: t("auth.changePassword"),
+        message: t("auth.passwordChanged"),
       });
       onPasswordChanged(response.user);
     } catch (error) {
       notify({
         type: "error",
-        title: "No se pudo cambiar la contraseña",
-        message: error instanceof Error ? error.message : "Inténtalo de nuevo.",
+        title: t("auth.changePasswordError"),
+        message: error instanceof Error ? error.message : t("app.retry"),
       });
     } finally {
       setSaving(false);
@@ -86,18 +87,17 @@ export default function ChangePasswordScreen({
     <div className="min-h-screen bg-ink bg-grid px-4 py-10 text-white">
       <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-5xl items-center justify-center">
         <section className="w-full max-w-2xl rounded-[32px] border border-white/10 bg-slate-950/85 p-8 shadow-panel">
-          <p className="text-xs uppercase tracking-[0.28em] text-amber-200">Cambio obligatorio</p>
-          <h1 className="mt-3 text-3xl font-semibold text-white">Actualiza tu contraseña</h1>
+          <p className="text-xs uppercase tracking-[0.28em] text-amber-200">{t("auth.mandatoryChange")}</p>
+          <h1 className="mt-3 text-3xl font-semibold text-white">{t("auth.changePassword")}</h1>
           <p className="mt-3 text-sm leading-7 text-slate-300">
-            La cuenta <strong>@{user.username}</strong> requiere una nueva contraseña antes de usar
-            el dashboard. Esta medida se activa tras un reset administrativo.
+            <strong>@{user.username}</strong> · {t("auth.mandatoryChangeSubtitle")}
           </p>
 
           <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
             <label className="space-y-2">
-              <span className="text-sm font-medium text-slate-200">Contraseña actual</span>
+              <span className="text-sm font-medium text-slate-200">{t("auth.currentPassword")}</span>
               <input
-                aria-label="Contraseña actual"
+                aria-label={t("auth.currentPassword")}
                 autoFocus
                 className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-cyan-300"
                 type="password"
@@ -110,21 +110,21 @@ export default function ChangePasswordScreen({
             </label>
 
             <label className="space-y-2">
-              <span className="text-sm font-medium text-slate-200">Nueva contraseña</span>
+              <span className="text-sm font-medium text-slate-200">{t("auth.newPassword")}</span>
               <input
-                aria-label="Nueva contraseña"
+                aria-label={t("auth.newPassword")}
                 className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-cyan-300"
                 type="password"
                 value={newPassword}
                 onChange={(event) => setNewPassword(event.target.value)}
               />
-              {errors.newPassword && <span className="text-sm text-rose-300">{errors.newPassword}</span>}
+              {errors.newPassword ? <span className="text-sm text-rose-300">{errors.newPassword}</span> : null}
             </label>
 
             <label className="space-y-2">
-              <span className="text-sm font-medium text-slate-200">Confirmar nueva contraseña</span>
+              <span className="text-sm font-medium text-slate-200">{t("auth.confirmNewPassword")}</span>
               <input
-                aria-label="Confirmar nueva contraseña"
+                aria-label={t("auth.confirmNewPassword")}
                 className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-cyan-300"
                 type="password"
                 value={confirmPassword}
@@ -137,20 +137,20 @@ export default function ChangePasswordScreen({
 
             <div className="flex flex-wrap gap-3 pt-2">
               <MotionButton
-                aria-label="Guardar nueva contraseña"
+                aria-label={t("auth.changePassword")}
                 className="rounded-2xl bg-orange-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={saving}
                 type="submit"
               >
-                {saving ? "Guardando..." : "Cambiar contraseña"}
+                {saving ? t("auth.savingPassword") : t("auth.changePassword")}
               </MotionButton>
               <MotionButton
-                aria-label="Cerrar sesión"
+                aria-label={t("common.logout")}
                 className="rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/5"
                 onClick={() => void onLogout()}
                 type="button"
               >
-                Logout
+                {t("common.logout")}
               </MotionButton>
             </div>
           </form>

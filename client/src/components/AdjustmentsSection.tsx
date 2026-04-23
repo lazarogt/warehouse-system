@@ -9,8 +9,8 @@ import {
   type WarehouseLocation,
 } from "../../../shared/src";
 import { useAuth } from "../auth/AuthProvider";
-import { createApiClient } from "../lib/api";
 import { safeArray } from "../lib/format";
+import { useDataProvider } from "../services/data-provider";
 import MotionButton from "./MotionButton";
 import SectionLoader from "./SectionLoader";
 import { useToast } from "./ToastProvider";
@@ -58,7 +58,7 @@ const initialForm: AdjustmentForm = {
 };
 
 export default function AdjustmentsSection({ apiBaseUrl }: AdjustmentsSectionProps) {
-  const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
+  const { http } = useDataProvider();
   const { user: currentUser } = useAuth();
   const { notify } = useToast();
   const [state, setState] = useState<AdjustmentsState>(initialState);
@@ -67,10 +67,10 @@ export default function AdjustmentsSection({ apiBaseUrl }: AdjustmentsSectionPro
   const loadData = useCallback(async () => {
     try {
       const [warehouses, locations, products, adjustments] = await Promise.all([
-        api.get<Warehouse[]>("/warehouses"),
-        api.get<WarehouseLocation[]>("/locations"),
-        api.get<ProductListResponse>("/products?page=1&pageSize=100"),
-        api.get<StockAdjustment[]>("/adjustments"),
+        http.get<Warehouse[]>("/warehouses"),
+        http.get<WarehouseLocation[]>("/locations"),
+        http.get<ProductListResponse>("/products?page=1&pageSize=100"),
+        http.get<StockAdjustment[]>("/adjustments"),
       ]);
 
       setState({
@@ -89,7 +89,7 @@ export default function AdjustmentsSection({ apiBaseUrl }: AdjustmentsSectionPro
         error: error instanceof Error ? error.message : "No se pudieron cargar los ajustes.",
       }));
     }
-  }, [api]);
+  }, [http]);
 
   useEffect(() => {
     void loadData();
@@ -137,7 +137,7 @@ export default function AdjustmentsSection({ apiBaseUrl }: AdjustmentsSectionPro
     };
 
     try {
-      await api.post("/adjustments", payload);
+      await http.post("/adjustments", payload);
       setFormValues(initialForm);
       notify({
         type: "success",

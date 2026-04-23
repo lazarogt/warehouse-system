@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -69,7 +71,7 @@ export const createApiClient = (apiBaseUrl: string) => {
       });
     } catch {
       throw new ApiError(
-        "No se pudo conectar con el servidor. Verifica la API y vuelve a intentarlo.",
+        "No se pudo conectar con el servidor.",
         0,
       );
     }
@@ -83,13 +85,13 @@ export const createApiClient = (apiBaseUrl: string) => {
         window.dispatchEvent(new CustomEvent("auth:unauthorized"));
       }
 
-      let message = `Request failed with status ${response.status}`;
+      let message = `${t("common.error")} ${response.status}`;
 
       try {
         const payload = (await response.json()) as { message?: string };
         message = payload.message ?? message;
       } catch {
-        message = `Request failed with status ${response.status}`;
+        message = `${t("common.error")} ${response.status}`;
       }
 
       throw new ApiError(message, response.status);
@@ -107,7 +109,7 @@ export const createApiClient = (apiBaseUrl: string) => {
       });
     } catch {
       throw new ApiError(
-        "No se pudo conectar con el servidor. Verifica la API y vuelve a intentarlo.",
+        "No se pudo conectar con el servidor.",
         0,
       );
     }
@@ -117,13 +119,13 @@ export const createApiClient = (apiBaseUrl: string) => {
         window.dispatchEvent(new CustomEvent("auth:unauthorized"));
       }
 
-      let message = `Request failed with status ${response.status}`;
+      let message = `${t("common.error")} ${response.status}`;
 
       try {
         const payload = (await response.json()) as { message?: string };
         message = payload.message ?? message;
       } catch {
-        message = `Request failed with status ${response.status}`;
+        message = `${t("common.error")} ${response.status}`;
       }
 
       throw new ApiError(message, response.status);

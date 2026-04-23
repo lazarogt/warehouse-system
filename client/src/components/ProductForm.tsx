@@ -7,7 +7,8 @@ import type {
   ProductAttributeInput,
   ProductInput,
 } from "../../../shared/src";
-import { createApiClient } from "../lib/api";
+import { t } from "../i18n";
+import { useDataProvider } from "../services/data-provider";
 import Modal from "./Modal";
 import MotionButton from "./MotionButton";
 
@@ -140,7 +141,7 @@ export default function ProductForm({
   onCancel,
   onSubmit,
 }: ProductFormProps) {
-  const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
+  const { http } = useDataProvider();
   const [values, setValues] = useState<FormValues>(buildInitialValues(initialProduct));
   const [attributeDefinitions, setAttributeDefinitions] = useState<CategoryAttribute[]>([]);
   const [attributeValues, setAttributeValues] = useState<DynamicAttributeValues>({});
@@ -165,7 +166,7 @@ export default function ProductForm({
       setAttributeLoading(true);
 
       try {
-        const attributes = await api.get<CategoryAttribute[]>(
+        const attributes = await http.get<CategoryAttribute[]>(
           `/categories/${values.categoryId}/attributes`,
         );
         const visibleAttributes = attributes.filter((attribute) => {
@@ -203,7 +204,7 @@ export default function ProductForm({
     return () => {
       active = false;
     };
-  }, [api, initialProduct, open, values.categoryId]);
+  }, [http, initialProduct, open, values.categoryId]);
 
   const title = useMemo(() => {
     return mode === "create" ? "Crear producto" : "Editar producto";
@@ -224,7 +225,7 @@ export default function ProductForm({
     }
 
     if (values.barcode && values.barcode.length > 120) {
-      nextErrors.barcode = "El barcode no puede superar los 120 caracteres.";
+      nextErrors.barcode = `${t("common.barcode")} no puede superar los 120 caracteres.`;
     }
 
     if (!values.categoryId) {
@@ -570,7 +571,7 @@ export default function ProductForm({
       <section className="rounded-[30px] border border-white/10 bg-gradient-to-br from-slate-950/95 via-slate-950/95 to-slate-900/95 p-6 shadow-panel">
         <div className="flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="toolbar-label">Product workspace</p>
+            <p className="toolbar-label">{t("products.title")}</p>
             <h3 id={titleId} className="mt-2 text-2xl font-semibold text-white">
               {title}
             </h3>
@@ -629,10 +630,10 @@ export default function ProductForm({
               </label>
 
               <label className="space-y-2">
-                <span className="field-label">Barcode</span>
-                <p className="field-hint">Codigo para lookup rapido y escaneo manual.</p>
+                <span className="field-label">{t("common.barcode")}</span>
+                <p className="field-hint">Código para búsqueda rápida y escaneo.</p>
                 <input
-                  aria-label="Barcode del producto"
+                  aria-label={t("common.barcode")}
                   value={values.barcode}
                   onChange={(event) =>
                     setValues((current) => ({ ...current, barcode: event.target.value }))

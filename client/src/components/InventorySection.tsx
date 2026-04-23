@@ -10,17 +10,19 @@ import {
   type Warehouse,
   type WarehouseLocation,
 } from "../../../shared/src";
+import { t, tMovementType } from "../i18n";
 import { useAuth } from "../auth/AuthProvider";
-import { createApiClient, getErrorMessage, saveDownloadedFile } from "../lib/api";
+import { getErrorMessage, saveDownloadedFile } from "../lib/api";
 import { safeArray, safeDateTime, safeInteger, safeText } from "../lib/format";
 import { triggerAlertsRefresh } from "../utils/alerts";
+import { useWarehouseContext } from "../context/WarehouseContext";
 import ActionGroup from "./ActionGroup";
 import GlobalLoader from "./GlobalLoader";
 import MotionButton from "./MotionButton";
 import SectionLoader from "./SectionLoader";
 import SectionNotice from "./SectionNotice";
 import { useToast } from "./ToastProvider";
-import { useDataProvider } from "../services/data-provider";
+import { type WarehouseScopedProduct, useDataProvider } from "../services/data-provider";
 
 type InventorySectionProps = {
   apiBaseUrl: string;
@@ -31,7 +33,7 @@ type InventorySectionState = {
   loading: boolean;
   saving: boolean;
   error: string | null;
-  products: Product[];
+  products: WarehouseScopedProduct[];
   warehouses: Warehouse[];
   locations: WarehouseLocation[];
   movements: StockMovement[];
@@ -77,10 +79,16 @@ export default function InventorySection({
   apiBaseUrl,
   mode = "inventory",
 }: InventorySectionProps) {
-  const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
   const { user: currentUser } = useAuth();
+  const { isDesktopMode, selectedWarehouseId, warehouseViewMode } = useWarehouseContext();
   const { notify } = useToast();
-  const { getInventorySnapshot, isOffline, lookupProduct, postInventoryMovement } = useDataProvider();
+  const {
+    getInventorySnapshot,
+    http,
+    isOffline,
+    lookupProduct,
+    postInventoryMovement,
+  } = useDataProvider();
   const [state, setState] = useState<InventorySectionState>(initialState);
   const [formValues, setFormValues] = useState<MovementFormValues>(createInitialForm);
   const [formErrors, setFormErrors] = useState<MovementFormErrors>({});
@@ -123,6 +131,29 @@ export default function InventorySection({
   useEffect(() => {
     void loadInventory();
   }, [loadInventory]);
+
+  useEffect(() => {
+    if (!selectedWarehouseId) {
+      return;
+    }
+
+    setFormValues((current) => {
+      const nextWarehouseId =
+        warehouseViewMode === "selected"
+          ? String(selectedWarehouseId)
+          : current.warehouseId || String(selectedWarehouseId);
+
+      if (current.warehouseId === nextWarehouseId) {
+        return current;
+      }
+
+      return {
+        ...current,
+        warehouseId: nextWarehouseId,
+        warehouseLocationId: "",
+      };
+    });
+  }, [selectedWarehouseId, warehouseViewMode]);
 
   const canRegisterMovements =
     currentUser?.role === "admin" ||
@@ -180,6 +211,18 @@ export default function InventorySection({
   const criticalProductIds = useMemo(() => {
     return new Set(state.lowStockAlerts.map((item) => item.id));
   }, [state.lowStockAlerts]);
+
+  const uniqueProducts = useMemo(() => {
+    const productsById = new Map<number, WarehouseScopedProduct>();
+
+    state.products.forEach((product) => {
+      if (!productsById.has(product.id)) {
+        productsById.set(product.id, product);
+      }
+    });
+
+    return [...productsById.values()];
+  }, [state.products]);
 
   const validateForm = () => {
     const nextErrors: MovementFormErrors = {};
@@ -277,11 +320,18 @@ export default function InventorySection({
       return;
     }
 
-    if (state.movements.length === 0) {
+    const desktopExportApi = window.api?.export;
+    const reportType = mode === "inventory" ? "inventory" : "movements";
+    const hasRows = mode === "inventory" ? state.stock.length > 0 : state.movements.length > 0;
+
+    if (!hasRows) {
       notify({
         type: "error",
         title: "No hay datos para exportar",
-        message: "Todavia no hay movimientos registrados.",
+        message:
+          mode === "inventory"
+            ? "Todavia no hay stock para exportar."
+            : "Todavia no hay movimientos registrados.",
       });
       return;
     }
@@ -289,7 +339,34 @@ export default function InventorySection({
     setExportingFormat(format);
 
     try {
-      const file = await api.download(`/reports/movements/export?format=${format}`);
+      if (isDesktopMode && desktopExportApi && (format === "pdf" || format === "excel")) {
+        const response =
+          format === "pdf"
+            ? await desktopExportApi.pdf({
+                reportType,
+                warehouseId: selectedWarehouseId ?? undefined,
+              })
+            : await desktopExportApi.excel({
+                reportType,
+                warehouseId: selectedWarehouseId ?? undefined,
+              });
+
+        if (!response.success) {
+          throw new Error(response.error.message || "No se pudo exportar.");
+        }
+
+        if (!response.data.canceled) {
+          notify({
+            type: "success",
+            title: "Exportacion generada",
+            message: `Se guardo el ${format.toUpperCase()} correctamente.`,
+          });
+        }
+
+        return;
+      }
+
+      const file = await http.download(`/reports/movements/export?format=${format}`);
       saveDownloadedFile(file);
       notify({
         type: "success",
@@ -321,8 +398,8 @@ export default function InventorySection({
     if (!value) {
       notify({
         type: "error",
-        title: "Lookup vacio",
-        message: "Ingresa un SKU o barcode para ubicar un producto.",
+        title: t("common.error"),
+        message: t("inventory.lookupEmpty"),
       });
       return;
     }
@@ -346,7 +423,7 @@ export default function InventorySection({
       notify({
         type: "error",
         title: "No se encontro el producto",
-        message: getErrorMessage(error, "Verifica SKU o barcode."),
+        message: getErrorMessage(error, "Verifica el SKU o el código de barras."),
       });
     } finally {
       setLookupLoading(false);
@@ -367,13 +444,10 @@ export default function InventorySection({
         <section className="rounded-[28px] border border-white/10 bg-gradient-to-br from-amber-400/15 to-orange-500/10 p-6 shadow-panel">
           <p className="text-xs uppercase tracking-[0.25em] text-amber-100">Trazabilidad</p>
           <h2 className="mt-2 text-3xl font-semibold text-white">Historial de movimientos</h2>
-          <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-200">
-            Vista operativa para revisar entradas y salidas recientes con usuario responsable,
-            cantidad, almacen y fecha del movimiento.
-          </p>
+          <p className="mt-3 text-sm text-slate-200">Entradas y salidas recientes.</p>
           {isOffline && (
             <div className="mt-4 inline-flex rounded-full border border-amber-300/20 bg-amber-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-amber-100">
-              Offline Mode
+              {t("common.offlineMode")}
             </div>
           )}
         </section>
@@ -383,22 +457,20 @@ export default function InventorySection({
         <section className="panel-surface">
           <div className="flex flex-col gap-5 border-b border-white/10 pb-5">
             <div>
-              <p className="toolbar-label">Inventory</p>
+              <p className="toolbar-label">{t("sections.inventario.label")}</p>
               <h3 className="mt-2 text-2xl font-semibold text-white">
                 {mode === "movements" ? "Registrar ajuste de movimiento" : "Registrar movimiento"}
               </h3>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                Entradas y salidas con bloqueo de stock negativo y trazabilidad por usuario.
-              </p>
+              <p className="mt-2 text-sm text-slate-300">Registro operativo.</p>
             </div>
 
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_auto]">
               <div className="panel-subtle p-4">
                 <label className="space-y-2">
-                  <span className="toolbar-label">Busqueda rapida por SKU / barcode</span>
+                  <span className="toolbar-label">Búsqueda rápida por SKU o código de barras</span>
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <input
-                      aria-label="Buscar producto por SKU o barcode en inventario"
+                      aria-label="Buscar producto por SKU o código de barras en inventario"
                       value={quickLookup}
                       onChange={(event) => setQuickLookup(event.target.value)}
                       onKeyDown={(event) => {
@@ -408,14 +480,14 @@ export default function InventorySection({
                         }
                       }}
                       className="toolbar-field min-w-0 flex-1"
-                      placeholder="Escanea o escribe SKU / barcode"
+                      placeholder="Escanea o escribe SKU o código de barras"
                     />
                     <MotionButton
                       aria-label="Buscar producto rapido para inventario"
                       onClick={() => void handleQuickLookup()}
                       className="min-h-[48px] rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20"
                     >
-                      {lookupLoading ? "Buscando..." : "Lookup"}
+                      {lookupLoading ? t("loading.processing") : t("common.search")}
                     </MotionButton>
                   </div>
                 </label>
@@ -424,21 +496,24 @@ export default function InventorySection({
                   <div className="panel-subtle mt-4 border-cyan-400/10 bg-slate-950/50 px-4 py-3 text-sm text-slate-200">
                     <p className="font-semibold text-white">{lookupResult.name}</p>
                     <p className="mt-1 text-slate-400">
-                      SKU: {lookupResult.sku ?? "No definido"} | Barcode: {lookupResult.barcode ?? "No definido"}
+                      SKU: {lookupResult.sku ?? t("common.noDefined")} | {t("common.barcode")}: {lookupResult.barcode ?? t("common.noDefined")}
                     </p>
                     <p className="mt-1 text-slate-400">
-                      Stock consolidado: {lookupResult.currentStock} | Categoria: {lookupResult.categoryName}
+                      Stock consolidado: {lookupResult.currentStock} | Categoría: {lookupResult.categoryName}
                     </p>
                   </div>
                 )}
               </div>
 
-              {mode === "movements" && canExportReports ? (
+              {((mode === "movements" && canExportReports) ||
+                (mode === "inventory" && isDesktopMode && canExportReports)) ? (
                 <div className="panel-subtle flex flex-col justify-between gap-3 p-4">
                   <div>
                     <p className="toolbar-label">Acciones</p>
                     <p className="mt-2 text-sm text-slate-300">
-                      Descarga el historial reciente sin salir del modulo.
+                      {mode === "inventory"
+                        ? "Exporta el inventario del almacen activo en un clic."
+                        : "Descarga el historial reciente sin salir del modulo."}
                     </p>
                   </div>
                   <ActionGroup align="end">
@@ -497,7 +572,7 @@ export default function InventorySection({
                     <option value="" className="bg-slate-900">
                       Selecciona un producto
                     </option>
-                    {state.products.map((product) => (
+                    {uniqueProducts.map((product) => (
                       <option key={product.id} value={product.id} className="bg-slate-900">
                         {product.name}
                       </option>
@@ -702,13 +777,18 @@ export default function InventorySection({
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                        <p className="truncate font-semibold text-white">
-                          {safeText(item.name, "Producto sin nombre")}
-                        </p>
-                        <p className="mt-1 text-sm text-slate-300">
+                      <p className="truncate font-semibold text-white">
+                        {safeText(item.name, "Producto sin nombre")}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-300">
                         {safeText(item.categoryName, "Sin categoria")}
                         {item.sku ? ` · ${safeText(item.sku)}` : ""}
                       </p>
+                      {item.warehouseName ? (
+                        <p className="mt-1 text-xs uppercase tracking-[0.18em] text-cyan-200">
+                          {t("common.warehouse")}: {safeText(item.warehouseName)}
+                        </p>
+                      ) : null}
                     </div>
                     <span className="rounded-full bg-rose-500/15 px-3 py-1 text-sm font-semibold text-rose-100">
                       {safeInteger(item.currentStock)}
@@ -720,11 +800,9 @@ export default function InventorySection({
           </article>
 
           <article className="panel-surface">
-            <p className="toolbar-label">Stock actual</p>
+            <p className="toolbar-label">{t("common.stock")} {t("common.current").toLowerCase()}</p>
             <h3 className="mt-2 text-2xl font-semibold text-white">Resumen operativo</h3>
-            <p className="mt-2 text-sm leading-6 text-slate-300">
-              Vista rapida del stock consolidado para priorizar decisiones operativas.
-            </p>
+            <p className="mt-2 text-sm text-slate-300">Stock priorizado.</p>
 
             <div className="mt-6 space-y-3">
               {state.stock.length === 0 ? (
@@ -760,11 +838,9 @@ export default function InventorySection({
       </div>
 
       <section className="panel-surface">
-        <p className="toolbar-label">Recent Movements</p>
+        <p className="toolbar-label">{t("inventory.recentMovements")}</p>
         <h3 className="mt-2 text-2xl font-semibold text-white">Movimientos recientes</h3>
-        <p className="mt-2 text-sm leading-6 text-slate-300">
-          Historial corto con producto, almacen, responsable y fecha para lectura rapida.
-        </p>
+        <p className="mt-2 text-sm text-slate-300">Últimos registros.</p>
 
         <div className="table-shell overflow-x-auto">
           <table className="table-fixed w-full min-w-[960px]">
@@ -815,7 +891,7 @@ export default function InventorySection({
                   </td>
                   <td className="px-5 py-5">
                     <span className={movement.type === "entry" ? "text-emerald-300" : "text-orange-300"}>
-                      {movement.type}
+                      {tMovementType(movement.type)}
                     </span>
                   </td>
                   <td className="px-5 py-5 text-sm text-slate-200">{safeInteger(movement.quantity)}</td>

@@ -6,10 +6,12 @@ import type {
   ProductInput,
   ReportFormat,
 } from "../../../shared/src";
+import { t } from "../i18n";
 import { useAuth } from "../auth/AuthProvider";
 import { getErrorMessage, saveDownloadedFile } from "../lib/api";
 import { safeArray } from "../lib/format";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
+import { useWarehouseContext } from "../context/WarehouseContext";
 import ConfirmDialog from "./ConfirmDialog";
 import ProductDetailsModal from "./ProductDetailsModal";
 import ProductForm from "./ProductForm";
@@ -20,7 +22,7 @@ import { useToast } from "./ToastProvider";
 import GlobalLoader from "./GlobalLoader";
 import { triggerAlertsRefresh } from "../utils/alerts";
 import MotionButton from "./MotionButton";
-import { useDataProvider } from "../services/data-provider";
+import { type WarehouseScopedProduct, useDataProvider } from "../services/data-provider";
 
 type ProductsSectionProps = {
   apiBaseUrl: string;
@@ -32,7 +34,7 @@ type ProductsSectionState = {
   saving: boolean;
   deletingProductId: number | null;
   error: string | null;
-  products: Product[];
+  products: WarehouseScopedProduct[];
   categories: Category[];
   total: number;
 };
@@ -52,8 +54,9 @@ const initialState: ProductsSectionState = {
 
 function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
   const { user: currentUser } = useAuth();
+  const { warehouseViewMode } = useWarehouseContext();
   const { notify } = useToast();
-  const { isOffline, listProducts, lookupProduct } = useDataProvider();
+  const { hasDesktopFallback, http, isOffline, listProducts, lookupProduct } = useDataProvider();
   const [state, setState] = useState<ProductsSectionState>(initialState);
   const [filters, setFilters] = useState({
     search: "",
@@ -96,7 +99,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
   );
 
   const loadCategories = useCallback(async () => {
-    if (isOffline) {
+    if (isOffline || hasDesktopFallback) {
       setState((current) => ({
         ...current,
         categoriesLoading: false,
@@ -106,8 +109,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     }
 
     try {
-      const { createApiClient } = await import("../lib/api");
-      const categories = await createApiClient(apiBaseUrl).get<Category[]>("/categories");
+      const categories = await http.get<Category[]>("/categories");
 
       setState((current) => ({
         ...current,
@@ -115,7 +117,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
         categories: safeArray(categories),
       }));
     } catch (error) {
-      const message = getErrorMessage(error, "No se pudieron cargar las categorias.");
+      const message = getErrorMessage(error, t("common.error"));
 
       setState((current) => ({
         ...current,
@@ -123,7 +125,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
         error: current.error ?? message,
       }));
     }
-  }, [apiBaseUrl, isOffline]);
+  }, [hasDesktopFallback, http, isOffline]);
 
   const loadProducts = useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -159,7 +161,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
         return;
       }
 
-      const message = getErrorMessage(error, "No se pudieron cargar los productos.");
+      const message = getErrorMessage(error, t("products.createError"));
 
       setState((current) => ({
         ...current,
@@ -190,7 +192,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
       return;
     }
 
-    if (isOffline) {
+    if (isOffline || hasDesktopFallback) {
       setAttributeFilterOptions([]);
       return;
     }
@@ -206,8 +208,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
 
     const loadAttributeOptions = async () => {
       try {
-        const { createApiClient } = await import("../lib/api");
-        const attributes = await createApiClient(apiBaseUrl).get<CategoryAttribute[]>(
+        const attributes = await http.get<CategoryAttribute[]>(
           `/categories/${filters.categoryId}/attributes`,
         );
 
@@ -230,11 +231,14 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     return () => {
       active = false;
     };
-  }, [apiBaseUrl, filters.categoryId, isOffline]);
+  }, [filters.categoryId, hasDesktopFallback, http, isOffline]);
 
   const canManage =
-    !isOffline && (currentUser?.role === "admin" || currentUser?.role === "manager");
-  const canDelete = !isOffline && currentUser?.role === "admin";
+    !hasDesktopFallback &&
+    !isOffline &&
+    (currentUser?.role === "admin" || currentUser?.role === "manager");
+  const canDelete = !hasDesktopFallback && !isOffline && currentUser?.role === "admin";
+  const canExport = !hasDesktopFallback;
   const totalPages = useMemo(() => Math.ceil(state.total / pageSize), [pageSize, state.total]);
 
   const handleOpenCreate = useCallback(() => {
@@ -263,22 +267,19 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     setState((current) => ({ ...current, saving: true, error: null }));
 
     try {
-      const { createApiClient } = await import("../lib/api");
-      const api = createApiClient(apiBaseUrl);
-
       if (formMode === "create") {
-        await api.post<Product>("/products", payload);
+        await http.post<Product>("/products", payload);
         notify({
           type: "success",
-          title: "Producto creado",
-          message: "El producto se agrego correctamente al catalogo.",
+          title: t("products.createSuccess"),
+          message: t("products.saveSuccessCreated"),
         });
       } else if (editingProduct) {
-        await api.put<Product>(`/products/${editingProduct.id}`, payload);
+        await http.put<Product>(`/products/${editingProduct.id}`, payload);
         notify({
           type: "success",
-          title: "Producto actualizado",
-          message: `Se actualizaron los datos de ${editingProduct.name}.`,
+          title: t("products.createSuccess"),
+          message: t("products.saveSuccessUpdated"),
         });
       }
 
@@ -286,7 +287,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
       await loadProducts();
       triggerAlertsRefresh();
     } catch (error) {
-      const message = getErrorMessage(error, "No se pudo guardar el producto.");
+      const message = getErrorMessage(error, t("products.createError"));
 
       setState((current) => ({
         ...current,
@@ -295,14 +296,14 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
       }));
       notify({
         type: "error",
-        title: "No se pudo guardar el producto",
+        title: t("products.createError"),
         message,
       });
       return;
     }
 
     setState((current) => ({ ...current, saving: false }));
-  }, [apiBaseUrl, editingProduct, formMode, handleCloseForm, loadProducts, notify, state.saving]);
+  }, [editingProduct, formMode, handleCloseForm, http, loadProducts, notify, state.saving]);
 
   const handleDelete = useCallback(async (product: Product) => {
     setPendingDeleteProduct(product);
@@ -320,18 +321,16 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     }));
 
     try {
-      const { createApiClient } = await import("../lib/api");
-      const api = createApiClient(apiBaseUrl);
-      await api.delete(`/products/${pendingDeleteProduct.id}`);
+      await http.delete(`/products/${pendingDeleteProduct.id}`);
       await loadProducts();
       triggerAlertsRefresh();
       notify({
         type: "success",
-        title: "Producto eliminado",
-        message: `Se elimino ${pendingDeleteProduct.name} del catalogo.`,
+        title: t("products.deleteSuccess"),
+        message: pendingDeleteProduct.name,
       });
     } catch (error) {
-      const message = getErrorMessage(error, "No se pudo eliminar el producto.");
+      const message = getErrorMessage(error, t("products.deleteError"));
 
       setState((current) => ({
         ...current,
@@ -340,7 +339,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
       }));
       notify({
         type: "error",
-        title: "No se pudo eliminar el producto",
+        title: t("products.deleteError"),
         message,
       });
       return;
@@ -351,7 +350,7 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
       deletingProductId: null,
     }));
     setPendingDeleteProduct(null);
-  }, [apiBaseUrl, loadProducts, notify, pendingDeleteProduct, state.deletingProductId]);
+  }, [http, loadProducts, notify, pendingDeleteProduct, state.deletingProductId]);
 
   const handleFiltersChange = useCallback((nextFilters: typeof filters) => {
     setFilters((current) => {
@@ -383,8 +382,8 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     if (state.total === 0) {
       notify({
         type: "error",
-        title: "No hay datos para exportar",
-        message: "El catalogo de productos esta vacio.",
+        title: t("common.error"),
+        message: t("products.empty"),
       });
       return;
     }
@@ -392,25 +391,23 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     setExportingFormat(format);
 
     try {
-      const { createApiClient } = await import("../lib/api");
-      const api = createApiClient(apiBaseUrl);
-      const file = await api.download(`/reports/products/export?format=${format}`);
+      const file = await http.download(`/reports/products/export?format=${format}`);
       saveDownloadedFile(file);
       notify({
         type: "success",
-        title: "Exportacion generada",
-        message: `Se descargo el reporte de productos en ${format.toUpperCase()}.`,
+        title: t("products.exportSuccess"),
+        message: format.toUpperCase(),
       });
     } catch (error) {
       notify({
         type: "error",
-        title: "No se pudo exportar productos",
-        message: getErrorMessage(error, "Intentalo de nuevo."),
+        title: t("products.exportError"),
+        message: getErrorMessage(error, t("app.retry")),
       });
     } finally {
       setExportingFormat(null);
     }
-  }, [apiBaseUrl, exportingFormat, notify, state.total]);
+  }, [exportingFormat, http, notify, state.total]);
 
   const handleQuickLookup = useCallback(async () => {
     if (lookupLoading) {
@@ -422,8 +419,8 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
     if (!value) {
       notify({
         type: "error",
-        title: "Lookup vacio",
-        message: "Ingresa un SKU o barcode para buscar rapido.",
+        title: t("common.error"),
+        message: t("products.lookupEmpty"),
       });
       return;
     }
@@ -435,15 +432,15 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
       setLookupResult(product);
       notify({
         type: "success",
-        title: "Producto encontrado",
-        message: `${product.name} listo para consulta rapida.`,
+        title: t("products.lookupResult"),
+        message: product.name,
       });
     } catch (error) {
       setLookupResult(null);
       notify({
         type: "error",
-        title: "Producto no encontrado",
-        message: getErrorMessage(error, "No se encontro coincidencia."),
+        title: t("products.lookupError"),
+        message: getErrorMessage(error, t("products.lookupError")),
       });
     } finally {
       setLookupLoading(false);
@@ -468,20 +465,20 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
   }, [handleExport]);
 
   if (state.loading || state.categoriesLoading) {
-    return <SectionLoader label="Cargando productos..." />;
+    return <SectionLoader label={t("products.loading")} />;
   }
 
   return (
     <div className="space-y-6">
       {state.error && (
-        <SectionNotice title="Error" message={state.error} tone="error" />
+        <SectionNotice title={t("common.error")} message={state.error} tone="error" />
       )}
 
       {!canManage && (
         <section className="rounded-[24px] border border-amber-400/20 bg-amber-500/10 px-5 py-4 text-sm text-amber-50">
           {isOffline
-            ? "Modo offline activo: consulta el catalogo local y usa Producto rapido para nuevas altas."
-            : "Tu rol actual puede consultar productos, pero no crear, editar ni borrar."}
+            ? t("common.offlineMode")
+            : t("products.manageInfoReadOnly")}
         </section>
       )}
 
@@ -512,50 +509,54 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
           onPageSizeChange={handlePageSizeChange}
           onExportExcel={handleExportExcel}
           onExportPdf={handleExportPdf}
+          canExport={canExport}
+          showWarehouseColumn={warehouseViewMode === "all"}
         />
 
         {showForm ? null : (
           <section className="rounded-[28px] border border-white/10 bg-gradient-to-br from-emerald-400/15 to-cyan-400/10 p-6 shadow-panel">
-            <p className="toolbar-label text-emerald-100">Resumen</p>
-            <h3 className="mt-2 text-2xl font-semibold text-white">Catalogo listo para operar</h3>
+            <p className="toolbar-label text-emerald-100">{t("common.section")}</p>
+            <h3 className="mt-2 text-2xl font-semibold text-white">{t("products.catalogReady")}</h3>
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <article className="panel-subtle p-4">
-                <p className="toolbar-label">Categorias</p>
+                <p className="toolbar-label">{t("common.category")}</p>
                 <p className="mt-3 text-3xl font-semibold text-white">{state.categories.length}</p>
               </article>
               <article className="panel-subtle p-4">
-                <p className="toolbar-label">Productos</p>
-                <p className="mt-3 text-3xl font-semibold text-white">{state.total}</p>
+                <p className="toolbar-label">{t("sections.productos.label")}</p>
+                <p className="mt-3 text-3xl font-semibold text-white">
+                  {warehouseViewMode === "all"
+                    ? new Set(state.products.map((product) => product.id)).size
+                    : state.total}
+                </p>
               </article>
             </div>
 
             <div className="panel-subtle mt-6 p-4 text-sm leading-7 text-slate-200">
               {canManage
-                ? "Puedes crear y editar productos desde este panel. Solo admin puede eliminarlos."
-                : "Tu rol mantiene acceso de consulta para revisar categoria, precio y niveles de stock."}
+                ? t("products.manageInfoAdmin")
+                : t("products.manageInfoReadOnly")}
             </div>
 
             <div className="panel-subtle mt-6 p-4">
-              <p className="toolbar-label">Busqueda rapida</p>
+              <p className="toolbar-label">{t("products.quickView")}</p>
               {lookupResult ? (
                 <div className="mt-3 space-y-2 text-sm text-slate-200">
                   <p className="text-lg font-semibold text-white">{lookupResult.name}</p>
-                  <p>SKU: {lookupResult.sku ?? "No definido"}</p>
-                  <p>Barcode: {lookupResult.barcode ?? "No definido"}</p>
-                  <p>Categoria: {lookupResult.categoryName}</p>
-                  <p>Stock actual: {lookupResult.currentStock}</p>
+                  <p>SKU: {lookupResult.sku ?? t("common.noDefined")}</p>
+                  <p>{t("common.barcode")}: {lookupResult.barcode ?? t("common.noDefined")}</p>
+                  <p>{t("common.category")}: {lookupResult.categoryName}</p>
+                  <p>{t("common.stock")}: {lookupResult.currentStock}</p>
                   <MotionButton
-                    aria-label={`Ver detalle rapido de ${lookupResult.name}`}
+                    aria-label={`${t("products.quickViewButton")} ${lookupResult.name}`}
                     onClick={() => setDetailProduct(lookupResult)}
                     className="mt-3 min-h-[40px] rounded-xl border border-cyan-400/20 px-3.5 text-sm text-cyan-100 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out motion-reduce:transition-none hover:bg-cyan-500/10"
                   >
-                    Ver detalle
+                    {t("products.quickViewButton")}
                   </MotionButton>
                 </div>
               ) : (
-                <p className="mt-3 text-sm text-slate-300">
-                  Usa el campo lookup para encontrar un producto por SKU o barcode en segundos.
-                </p>
+                <p className="mt-3 text-sm text-slate-300">{t("products.lookupHelp")}</p>
               )}
             </div>
           </section>
@@ -581,20 +582,20 @@ function ProductsSection({ apiBaseUrl }: ProductsSectionProps) {
 
       <ConfirmDialog
         open={Boolean(pendingDeleteProduct)}
-        title="Eliminar producto"
+        title={t("products.deleteConfirm")}
         description={
           pendingDeleteProduct
-            ? `Vas a eliminar ${pendingDeleteProduct.name}. Esta accion no se puede deshacer.`
+            ? `${pendingDeleteProduct.name}. ${t("products.deleteDescription")}`
             : ""
         }
-        confirmLabel="Eliminar producto"
+        confirmLabel={t("products.deleteConfirm")}
         confirming={pendingDeleteProduct ? state.deletingProductId === pendingDeleteProduct.id : false}
         onCancel={() => setPendingDeleteProduct(null)}
         onConfirm={() => void handleConfirmDelete()}
       />
 
       {exportingFormat && (
-        <GlobalLoader fullscreen label={`Generando exportacion ${exportingFormat.toUpperCase()}...`} />
+        <GlobalLoader fullscreen label={`${t("common.generate")} ${exportingFormat.toUpperCase()}...`} />
       )}
     </div>
   );

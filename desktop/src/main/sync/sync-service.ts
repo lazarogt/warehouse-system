@@ -1247,5 +1247,19 @@ export function createSyncAwareWarehouseDataService(
       syncService.enqueueStockMovementPush(movement.id, movement.date);
       return movement;
     },
+    dispatchProduct(input) {
+      const movement = warehouseDataService.dispatchProduct(input);
+      syncService.noteProductWrite(movement.productId, movement.date);
+      syncService.enqueueStockMovementPush(movement.id, movement.date);
+      return movement;
+    },
+    transferStock(input) {
+      const transfer = warehouseDataService.transferStock(input);
+      syncService.noteProductWrite(transfer.productId, transfer.movedAt);
+      for (const movementId of transfer.movementIds) {
+        syncService.enqueueStockMovementPush(movementId, transfer.movedAt);
+      }
+      return transfer;
+    },
   };
 }

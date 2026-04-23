@@ -4,14 +4,25 @@ import type {
   RestoreBackupResult,
 } from "../../../shared/src/types/desktop-backup-ipc";
 import type {
+  DesktopExportPayload,
+  DesktopExportResult,
+} from "../../../shared/src/types/desktop-export-ipc";
+import type {
   ApiResponse,
   CreateProductPayload,
   CreateStockMovementPayload,
   CreateWarehousePayload,
+  DeactivateWarehousePayload,
+  DeactivateWarehouseResult,
+  DispatchProductPayload,
+  GetProductsPayload,
   GetStockMovementsPayload,
   GetWarehouseStockPayload,
   Product,
   StockMovement,
+  TransferStockPayload,
+  TransferStockResult,
+  UpdateWarehousePayload,
   UpdateProductStockPayload,
   SetWarehouseStockPayload,
   Warehouse,
@@ -26,10 +37,19 @@ declare global {
         createBackup(): Promise<ApiResponse<CreateBackupResult>>;
         restoreBackup(payload?: RestoreBackupPayload): Promise<ApiResponse<RestoreBackupResult>>;
       };
+      export: {
+        pdf(payload: DesktopExportPayload): Promise<ApiResponse<DesktopExportResult>>;
+        excel(payload: DesktopExportPayload): Promise<ApiResponse<DesktopExportResult>>;
+      };
       warehouse: {
-        getProducts(): Promise<ApiResponse<Product[]>>;
+        getProducts(payload?: GetProductsPayload): Promise<ApiResponse<Product[]>>;
         createProduct(payload: CreateProductPayload): Promise<ApiResponse<Product>>;
+        dispatchProduct(payload: DispatchProductPayload): Promise<ApiResponse<StockMovement>>;
         createWarehouse(payload: CreateWarehousePayload): Promise<ApiResponse<Warehouse>>;
+        updateWarehouse(payload: UpdateWarehousePayload): Promise<ApiResponse<Warehouse>>;
+        deactivateWarehouse(
+          payload: DeactivateWarehousePayload,
+        ): Promise<ApiResponse<DeactivateWarehouseResult>>;
         updateProductStock(payload: UpdateProductStockPayload): Promise<ApiResponse<Product>>;
         getStockMovements(
           payload?: GetStockMovementsPayload,
@@ -41,6 +61,7 @@ declare global {
           payload: CreateStockMovementPayload,
         ): Promise<ApiResponse<StockMovement>>;
         setWarehouseStock(payload: SetWarehouseStockPayload): Promise<ApiResponse<WarehouseStock>>;
+        transferStock(payload: TransferStockPayload): Promise<ApiResponse<TransferStockResult>>;
         sync(): Promise<ApiResponse<WarehouseSyncResult>>;
       };
     };

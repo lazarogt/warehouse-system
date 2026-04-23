@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import type {
+  ApiResponse,
   CreateProductPayload,
   CreateStockMovementPayload,
   CreateWarehousePayload,
+  DeactivateWarehousePayload,
+  DeactivateWarehouseResult,
+  DispatchProductPayload,
+  GetProductsPayload,
   GetStockMovementsPayload,
   GetWarehouseStockPayload,
   Product,
@@ -11,6 +16,9 @@ import type {
   WarehouseStock,
   StockMovement,
   SetWarehouseStockPayload,
+  TransferStockPayload,
+  TransferStockResult,
+  UpdateWarehousePayload,
   UpdateProductStockPayload,
 } from "../../../../shared/src/types/desktop-warehouse-ipc";
 import type { DatabaseLogger } from "../db/database";
@@ -62,12 +70,33 @@ function createMockService(): WarehouseDataService {
         createdAt: "2026-01-01T00:00:00.000Z",
       };
     },
+    dispatchProduct(input) {
+      return {
+        id: 77,
+        productId: input.productId,
+        warehouseId: input.warehouseId,
+        type: "out",
+        reason: "dispatch",
+        quantity: input.quantity,
+        metadata: {
+          customer: input.customer,
+          ...(input.notes ? { notes: input.notes } : {}),
+        },
+        date: "2026-01-08T00:00:00.000Z",
+      };
+    },
     createWarehouse(input) {
       return {
         id: 1,
         name: input.name,
         location: input.location,
+        isActive: 1,
         createdAt: "2026-01-01T00:00:00.000Z",
+      };
+    },
+    deactivateWarehouse(warehouseId) {
+      return {
+        warehouseId,
       };
     },
     createUser() {
@@ -87,14 +116,14 @@ function createMockService(): WarehouseDataService {
         users: 0,
       };
     },
-    listProducts() {
+    listProducts(filters?: GetProductsPayload) {
       return [
         {
           id: 1,
           name: "Keyboard",
           sku: "KB-100",
           price: 50,
-          stock: 10,
+          stock: filters?.warehouseId ?? 10,
           createdAt: "2026-01-01T00:00:00.000Z",
         },
       ];
@@ -106,10 +135,15 @@ function createMockService(): WarehouseDataService {
           productId: filters?.productId ?? 1,
           warehouseId: filters?.warehouseId ?? 1,
           type: "in",
+          reason: "adjustment",
           quantity: 5,
+          metadata: null,
           date: "2026-01-02T00:00:00.000Z",
         },
       ];
+    },
+    listWarehouseInventory() {
+      return [];
     },
     listUsers() {
       return [];
@@ -120,6 +154,7 @@ function createMockService(): WarehouseDataService {
           id: 1,
           name: "Central Warehouse",
           location: "Havana HQ",
+          isActive: 1,
           createdAt: "2026-01-01T00:00:00.000Z",
         },
       ];
@@ -130,7 +165,9 @@ function createMockService(): WarehouseDataService {
         productId: input.productId,
         warehouseId: input.warehouseId ?? 1,
         type: input.type,
+        reason: input.reason ?? "adjustment",
         quantity: input.quantity,
+        metadata: input.metadata ?? null,
         date: input.date ?? "2026-01-03T00:00:00.000Z",
       };
     },
@@ -139,6 +176,25 @@ function createMockService(): WarehouseDataService {
         warehouseId: input.warehouseId,
         productId: input.productId,
         quantity: input.quantity,
+      };
+    },
+    updateWarehouse(input) {
+      return {
+        id: input.warehouseId,
+        name: input.name,
+        location: input.location,
+        isActive: 1,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      };
+    },
+    transferStock(input) {
+      return {
+        sourceId: input.sourceId,
+        targetId: input.targetId,
+        productId: input.productId,
+        quantity: input.quantity,
+        movedAt: "2026-01-09T00:00:00.000Z",
+        movementIds: [50, 51],
       };
     },
     updateProductStock(input) {
@@ -217,6 +273,88 @@ test("createProduct handler trims payload and returns standardized success respo
   assert.equal(response.data?.sku, "NP-1");
 });
 
+test("getProducts handler forwards optional warehouse scope", () => {
+  const { handlers, registrar } = createMockRegistrar();
+  let capturedFilters: GetProductsPayload | undefined;
+  const service = createMockService();
+  service.listProducts = (filters) => {
+    capturedFilters = filters;
+
+    return [
+      {
+        id: 9,
+        name: "Scoped Keyboard",
+        sku: "KB-900",
+        price: 75,
+        stock: 4,
+        createdAt: "2026-01-10T00:00:00.000Z",
+      },
+    ];
+  };
+
+  registerWarehouseIpcHandlers({
+    logger: createMockLogger(),
+    registrar,
+    warehouseDataService: service,
+  });
+
+  const response = getRegisteredHandler(handlers, WAREHOUSE_IPC_CHANNELS.getProducts)(null, {
+    warehouseId: 3,
+  }) as ApiResponse<Product[]>;
+
+  assert.deepEqual(capturedFilters, { warehouseId: 3 });
+  assert.equal(response.success, true);
+  assert.deepEqual(response.success ? response.data[0]?.stock : null, 4);
+});
+
+test("dispatchProduct handler validates payload and returns dispatch metadata", () => {
+  const { handlers, registrar } = createMockRegistrar();
+  let capturedPayload: DispatchProductPayload | null = null;
+  const service = createMockService();
+  service.dispatchProduct = (input) => {
+    capturedPayload = input;
+
+    return {
+      id: 12,
+      productId: input.productId,
+      warehouseId: input.warehouseId,
+      type: "out",
+      reason: "dispatch",
+      quantity: input.quantity,
+      metadata: {
+        customer: input.customer,
+        ...(input.notes ? { notes: input.notes } : {}),
+      },
+      date: "2026-01-08T00:00:00.000Z",
+    };
+  };
+
+  registerWarehouseIpcHandlers({
+    logger: createMockLogger(),
+    registrar,
+    warehouseDataService: service,
+  });
+
+  const response = getRegisteredHandler(handlers, WAREHOUSE_IPC_CHANNELS.dispatchProduct)(null, {
+    warehouseId: 5,
+    productId: 8,
+    quantity: 2,
+    customer: "  Cliente Norte  ",
+    notes: "  Entrega parcial  ",
+  }) as { success: boolean; data?: StockMovement; error?: { code: string; message: string } };
+
+  assert.equal(response.success, true);
+  assert.deepEqual(capturedPayload, {
+    warehouseId: 5,
+    productId: 8,
+    quantity: 2,
+    customer: "Cliente Norte",
+    notes: "Entrega parcial",
+  });
+  assert.equal(response.data?.reason, "dispatch");
+  assert.equal(response.data?.metadata?.customer, "Cliente Norte");
+});
+
 test("createWarehouse handler trims payload and returns standardized success response", () => {
   const { handlers, registrar } = createMockRegistrar();
   let capturedPayload: CreateWarehousePayload | null = null;
@@ -231,6 +369,7 @@ test("createWarehouse handler trims payload and returns standardized success res
       id: 5,
       name: input.name,
       location: input.location,
+      isActive: 1,
       createdAt: "2026-01-04T00:00:00.000Z",
     };
   };
@@ -254,6 +393,132 @@ test("createWarehouse handler trims payload and returns standardized success res
   assert.equal(response.data?.location, "Havana HQ");
 });
 
+test("updateWarehouse handler trims payload and maps the updated warehouse", () => {
+  const { handlers, registrar } = createMockRegistrar();
+  let capturedPayload: UpdateWarehousePayload | null = null;
+  const service = createMockService();
+  service.updateWarehouse = (input) => {
+    capturedPayload = {
+      warehouseId: input.warehouseId,
+      name: input.name,
+      location: input.location,
+    };
+
+    return {
+      id: input.warehouseId,
+      name: input.name,
+      location: input.location,
+      createdAt: "2026-01-07T00:00:00.000Z",
+    };
+  };
+
+  registerWarehouseIpcHandlers({
+    logger: createMockLogger(),
+    registrar,
+    warehouseDataService: service,
+  });
+
+  const response = getRegisteredHandler(handlers, WAREHOUSE_IPC_CHANNELS.updateWarehouse)(null, {
+    warehouseId: 4,
+    name: "  Almacen Norte  ",
+    location: "  Medellin  ",
+  }) as { success: boolean; data?: Warehouse; error?: { code: string; message: string } };
+
+  assert.equal(response.success, true);
+  assert.deepEqual(capturedPayload, {
+    warehouseId: 4,
+    name: "Almacen Norte",
+    location: "Medellin",
+  });
+  assert.equal(response.data?.id, 4);
+  assert.equal(response.data?.name, "Almacen Norte");
+});
+
+test("deactivateWarehouse handler validates payload and returns the warehouse id", () => {
+  const { handlers, registrar } = createMockRegistrar();
+  let capturedPayload: DeactivateWarehousePayload | null = null;
+  const service = createMockService();
+  service.deactivateWarehouse = (warehouseId) => {
+    capturedPayload = {
+      warehouseId,
+    };
+
+    return {
+      warehouseId,
+    };
+  };
+
+  registerWarehouseIpcHandlers({
+    logger: createMockLogger(),
+    registrar,
+    warehouseDataService: service,
+  });
+
+  const response = getRegisteredHandler(handlers, WAREHOUSE_IPC_CHANNELS.deactivateWarehouse)(
+    null,
+    {
+    warehouseId: 6,
+    },
+  ) as {
+    success: boolean;
+    data?: DeactivateWarehouseResult;
+    error?: { code: string; message: string };
+  };
+
+  assert.equal(response.success, true);
+  assert.deepEqual(capturedPayload, {
+    warehouseId: 6,
+  });
+  assert.equal(response.data?.warehouseId, 6);
+});
+
+test("transferStock handler validates payload and returns the mapped transfer result", () => {
+  const { handlers, registrar } = createMockRegistrar();
+  let capturedPayload: TransferStockPayload | null = null;
+  const service = createMockService();
+
+  service.transferStock = (input) => {
+    capturedPayload = input;
+
+    return {
+      sourceId: input.sourceId,
+      targetId: input.targetId,
+      productId: input.productId,
+      quantity: input.quantity,
+      movedAt: "2026-01-10T00:00:00.000Z",
+      movementIds: [70, 71],
+    };
+  };
+
+  registerWarehouseIpcHandlers({
+    logger: createMockLogger(),
+    registrar,
+    warehouseDataService: service,
+  });
+
+  const response = getRegisteredHandler(handlers, WAREHOUSE_IPC_CHANNELS.transferStock)(null, {
+    sourceId: 2,
+    targetId: 3,
+    productId: 4,
+    quantity: 7,
+  }) as {
+    success: boolean;
+    data?: TransferStockResult;
+    error?: { code: string; message: string };
+  };
+
+  assert.equal(response.success, true);
+  assert.deepEqual(capturedPayload, {
+    sourceId: 2,
+    targetId: 3,
+    productId: 4,
+    quantity: 7,
+  });
+  assert.equal(response.data?.targetId, 3);
+  assert.equal(response.data?.quantity, 7);
+  assert.deepEqual(response.data?.movementIds, [70, 71]);
+});
+
 test("updateProductStock handler rejects invalid payloads with structured errors", () => {
   const { handlers, registrar } = createMockRegistrar();
 
@@ -271,6 +536,26 @@ test("updateProductStock handler rejects invalid payloads with structured errors
   assert.equal(response.success, false);
   assert.equal(response.error?.code, "VALIDATION_ERROR");
   assert.match(response.error?.message ?? "", /productId/);
+});
+
+test("updateWarehouse handler rejects invalid payloads with structured errors", () => {
+  const { handlers, registrar } = createMockRegistrar();
+
+  registerWarehouseIpcHandlers({
+    logger: createMockLogger(),
+    registrar,
+    warehouseDataService: createMockService(),
+  });
+
+  const response = getRegisteredHandler(handlers, WAREHOUSE_IPC_CHANNELS.updateWarehouse)(null, {
+    warehouseId: 0,
+    name: "  ",
+    location: "Centro",
+  }) as { success: boolean; data?: Warehouse; error?: { code: string; message: string } };
+
+  assert.equal(response.success, false);
+  assert.equal(response.error?.code, "VALIDATION_ERROR");
+  assert.match(response.error?.message ?? "", /warehouseId|name/);
 });
 
 test("createStockMovement handler forwards validated payload to the service", () => {

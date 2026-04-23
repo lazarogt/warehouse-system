@@ -9,7 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import type { AuthResponse, User } from "../../../shared/src";
-import { ApiError, createApiClient, getApiBaseUrl } from "../lib/api";
+import { t } from "../i18n";
+import { ApiError, getApiBaseUrl } from "../lib/api";
 import { useDataProvider } from "../services/data-provider";
 
 type AuthContextValue = {
@@ -85,9 +86,8 @@ function persistSession(user: User | null, isOfflineAuth: boolean): void {
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
-  const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
-  const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
-  const { hasDesktopFallback, isOffline, setOfflineFromFailure } = useDataProvider();
+  const apiBaseUrl = getApiBaseUrl();
+  const { hasDesktopFallback, http, isOffline, setOfflineFromFailure } = useDataProvider();
   const [user, setUser] = useState<User | null>(() => {
     if (!hasDesktopFallback) {
       return readStoredSession();
@@ -115,7 +115,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const activateOfflineSession = useCallback(() => {
     const offlineUser = createOfflineAdminUser();
 
-    console.info("[auth] offline mode active");
     setUser(offlineUser);
     setIsOfflineAuth(true);
     setError(null);
@@ -126,8 +125,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const refreshSession = useCallback(async () => {
     setError(null);
 
+    if (hasDesktopFallback) {
+      return activateOfflineSession();
+    }
+
     try {
-      const response = await api.get<AuthResponse>("/auth/me");
+      const response = await http.get<AuthResponse>("/auth/me");
       setUser(response.user);
       setIsOfflineAuth(false);
       return response.user;
@@ -144,7 +147,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       const message =
-        authError instanceof Error ? authError.message : "No se pudo verificar la sesion.";
+        authError instanceof Error ? authError.message : t("app.sessionRequired");
       if (hasDesktopFallback) {
         setOfflineFromFailure();
         return activateOfflineSession();
@@ -155,7 +158,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setIsOfflineAuth(false);
       return null;
     }
-  }, [activateOfflineSession, api, hasDesktopFallback, setOfflineFromFailure]);
+  }, [activateOfflineSession, hasDesktopFallback, http, setOfflineFromFailure]);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -210,11 +213,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     async (identifier: string, password: string) => {
       setError(null);
 
-      if (hasDesktopFallback && (isOffline || isOfflineAuth)) {
+      if (hasDesktopFallback || isOffline || isOfflineAuth) {
         return activateOfflineSession();
       }
 
-      const response = await api.post<AuthResponse>("/auth/login", {
+      const response = await http.post<AuthResponse>("/auth/login", {
         identifier,
         password: password,
       });
@@ -222,23 +225,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setIsOfflineAuth(false);
       return response.user;
     },
-    [activateOfflineSession, api, hasDesktopFallback, isOffline, isOfflineAuth],
+    [activateOfflineSession, hasDesktopFallback, http, isOffline, isOfflineAuth],
   );
 
   const logout = useCallback(async () => {
-    if (hasDesktopFallback && (isOffline || isOfflineAuth)) {
+    if (hasDesktopFallback || isOffline || isOfflineAuth) {
       activateOfflineSession();
       return;
     }
 
     try {
-      await api.post("/auth/logout");
+      await http.post("/auth/logout");
     } finally {
       setUser(null);
       setIsOfflineAuth(false);
       setError(null);
     }
-  }, [activateOfflineSession, api, hasDesktopFallback, isOffline, isOfflineAuth]);
+  }, [activateOfflineSession, hasDesktopFallback, http, isOffline, isOfflineAuth]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

@@ -1,4 +1,4 @@
-export const DATABASE_SCHEMA_VERSION = 2;
+export const DATABASE_SCHEMA_VERSION = 4;
 export const SQLITE_NOW_EXPRESSION = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 
 export type DatabaseMigration = {
@@ -139,6 +139,95 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
       `
         CREATE INDEX IF NOT EXISTS idx_warehouse_stock_product_id
         ON warehouse_stock (product_id);
+      `,
+    ],
+  },
+  {
+    version: 3,
+    name: "003_active_warehouses",
+    statements: [
+      `
+        ALTER TABLE warehouses
+        ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1));
+      `,
+      `
+        UPDATE warehouses
+        SET is_active = 1
+        WHERE is_active IS NULL;
+      `,
+      `
+        CREATE INDEX IF NOT EXISTS idx_warehouses_active_name
+        ON warehouses (is_active, name);
+      `,
+    ],
+  },
+  {
+    version: 4,
+    name: "004_stock_movement_reason_metadata",
+    statements: [
+      `
+        CREATE TABLE stock_movements_v4 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          product_id INTEGER NOT NULL,
+          warehouse_id INTEGER NOT NULL,
+          type TEXT NOT NULL CHECK (type IN ('IN', 'OUT')),
+          reason TEXT NOT NULL CHECK (reason IN ('dispatch', 'transfer', 'adjustment')),
+          quantity INTEGER NOT NULL CHECK (quantity > 0),
+          metadata TEXT,
+          date TEXT NOT NULL DEFAULT (${SQLITE_NOW_EXPRESSION}),
+          FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT,
+          FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT
+        );
+      `,
+      `
+        INSERT INTO stock_movements_v4 (id, product_id, warehouse_id, type, reason, quantity, metadata, date)
+        SELECT
+          id,
+          product_id,
+          COALESCE(
+            warehouse_id,
+            (
+              SELECT id
+              FROM warehouses
+              ORDER BY id ASC
+              LIMIT 1
+            )
+          ),
+          CASE UPPER(type)
+            WHEN 'IN' THEN 'IN'
+            ELSE 'OUT'
+          END,
+          'adjustment',
+          quantity,
+          NULL,
+          date
+        FROM stock_movements;
+      `,
+      `
+        DROP TABLE stock_movements;
+      `,
+      `
+        ALTER TABLE stock_movements_v4 RENAME TO stock_movements;
+      `,
+      `
+        CREATE INDEX IF NOT EXISTS idx_stock_movements_product_id
+        ON stock_movements (product_id);
+      `,
+      `
+        CREATE INDEX IF NOT EXISTS idx_stock_movements_date
+        ON stock_movements (date);
+      `,
+      `
+        CREATE INDEX IF NOT EXISTS idx_stock_movements_warehouse_id
+        ON stock_movements (warehouse_id);
+      `,
+      `
+        CREATE INDEX IF NOT EXISTS idx_stock_movements_product_warehouse
+        ON stock_movements (product_id, warehouse_id);
+      `,
+      `
+        CREATE INDEX IF NOT EXISTS idx_stock_movements_reason_date
+        ON stock_movements (reason, date);
       `,
     ],
   },

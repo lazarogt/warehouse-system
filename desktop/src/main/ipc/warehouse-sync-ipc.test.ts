@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import type { DatabaseLogger } from "../db/database";
 import { WAREHOUSE_SYNC_IPC_CHANNELS } from "../../shared/warehouse-sync-ipc-channels";
 import { registerWarehouseSyncIpcHandlers } from "./warehouse-sync-ipc";

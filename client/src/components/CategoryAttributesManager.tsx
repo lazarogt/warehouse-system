@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   Category,
   CategoryAttribute,
@@ -7,7 +7,8 @@ import type {
   User,
 } from "../../../shared/src";
 import { CATEGORY_ATTRIBUTE_TYPES } from "../../../shared/src";
-import { createApiClient } from "../lib/api";
+import { t, tCategoryAttributeType } from "../i18n";
+import { useDataProvider } from "../services/data-provider";
 import ConfirmDialog from "./ConfirmDialog";
 import Modal from "./Modal";
 import MotionButton from "./MotionButton";
@@ -63,7 +64,7 @@ export default function CategoryAttributesManager({
   categories,
   currentUser,
 }: CategoryAttributesManagerProps) {
-  const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
+  const { http } = useDataProvider();
   const { notify } = useToast();
   const [state, setState] = useState<CategoryAttributesState>(initialState);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(
@@ -96,7 +97,7 @@ export default function CategoryAttributesManager({
       setState((current) => ({ ...current, loading: true, error: null }));
 
       try {
-        const attributes = await api.get<CategoryAttribute[]>(
+        const attributes = await http.get<CategoryAttribute[]>(
           `/categories/${selectedCategoryId}/attributes`,
         );
 
@@ -129,7 +130,7 @@ export default function CategoryAttributesManager({
     return () => {
       active = false;
     };
-  }, [api, selectedCategoryId]);
+  }, [http, selectedCategoryId]);
 
   const openCreate = () => {
     setEditingAttribute(null);
@@ -207,7 +208,9 @@ export default function CategoryAttributesManager({
       return;
     }
 
-    const attributes = await api.get<CategoryAttribute[]>(`/categories/${selectedCategoryId}/attributes`);
+    const attributes = await http.get<CategoryAttribute[]>(
+      `/categories/${selectedCategoryId}/attributes`,
+    );
     setState((current) => ({
       ...current,
       attributes,
@@ -226,7 +229,7 @@ export default function CategoryAttributesManager({
 
     try {
       if (editingAttribute) {
-        await api.put(
+        await http.put(
           `/categories/${selectedCategoryId}/attributes/${editingAttribute.id}`,
           buildPayload(),
         );
@@ -236,7 +239,7 @@ export default function CategoryAttributesManager({
           message: `Se actualizo ${editingAttribute.label}.`,
         });
       } else {
-        await api.post(`/categories/${selectedCategoryId}/attributes`, buildPayload());
+        await http.post(`/categories/${selectedCategoryId}/attributes`, buildPayload());
         notify({
           type: "success",
           title: "Atributo creado",
@@ -270,7 +273,7 @@ export default function CategoryAttributesManager({
     setState((current) => ({ ...current, deletingId: pendingDelete.id, error: null }));
 
     try {
-      await api.delete(`/categories/${selectedCategoryId}/attributes/${pendingDelete.id}`);
+      await http.delete(`/categories/${selectedCategoryId}/attributes/${pendingDelete.id}`);
       await reloadAttributes();
       notify({
         type: "success",
@@ -302,7 +305,7 @@ export default function CategoryAttributesManager({
     setState((current) => ({ ...current, togglingId: attribute.id, error: null }));
 
     try {
-      await api.put(`/categories/${selectedCategoryId}/attributes/${attribute.id}`, {
+      await http.put(`/categories/${selectedCategoryId}/attributes/${attribute.id}`, {
         key: attribute.key,
         label: attribute.label,
         type: attribute.type,
@@ -336,8 +339,8 @@ export default function CategoryAttributesManager({
     <section className="rounded-[28px] border border-white/10 bg-slate-950/55 p-6 shadow-panel">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Universal Catalog</p>
-          <h3 className="mt-2 text-2xl font-semibold text-white">Atributos por categoria</h3>
+          <p className="text-xs uppercase tracking-[0.25em] text-slate-400">{t("attributes.universalCatalog")}</p>
+          <h3 className="mt-2 text-2xl font-semibold text-white">{t("attributes.title")}</h3>
           <p className="mt-2 text-sm text-slate-400">
             Define campos dinamicos reutilizables para productos sin modificar la tabla base.
           </p>
@@ -394,14 +397,14 @@ export default function CategoryAttributesManager({
           <table className="table-fixed w-full min-w-[1120px]">
             <thead>
               <tr className="border-b border-white/10 bg-white/[0.04] text-left text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                <th className="px-4 py-3 font-medium">Clave</th>
-                <th className="px-4 py-3 font-medium">Etiqueta</th>
-                <th className="px-4 py-3 font-medium">Tipo</th>
-                <th className="px-4 py-3 font-medium">Requerido</th>
-                <th className="px-4 py-3 font-medium">Activo</th>
-                <th className="px-4 py-3 font-medium">Uso</th>
-                <th className="px-4 py-3 font-medium">Orden</th>
-                <th className="w-40 px-4 py-3 text-right font-medium">Acciones</th>
+                <th className="px-4 py-3 font-medium">{t("attributes.key")}</th>
+                <th className="px-4 py-3 font-medium">{t("attributes.label")}</th>
+                <th className="px-4 py-3 font-medium">{t("common.type")}</th>
+                <th className="px-4 py-3 font-medium">{t("attributes.required")}</th>
+                <th className="px-4 py-3 font-medium">{t("attributes.active")}</th>
+                <th className="px-4 py-3 font-medium">{t("attributes.usage")}</th>
+                <th className="px-4 py-3 font-medium">{t("attributes.order")}</th>
+                <th className="w-40 px-4 py-3 text-right font-medium">{t("common.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -416,9 +419,9 @@ export default function CategoryAttributesManager({
                     </div>
                   </td>
                   <td className="px-4 py-4 text-sm text-slate-200">{attribute.label}</td>
-                  <td className="px-4 py-4 text-sm uppercase text-slate-300">{attribute.type}</td>
-                  <td className="px-4 py-4 text-sm text-slate-300">{attribute.required ? "Si" : "No"}</td>
-                  <td className="px-4 py-4 text-sm text-slate-300">{attribute.active ? "Si" : "No"}</td>
+                  <td className="px-4 py-4 text-sm uppercase text-slate-300">{tCategoryAttributeType(attribute.type)}</td>
+                  <td className="px-4 py-4 text-sm text-slate-300">{attribute.required ? t("common.yes") : t("common.no")}</td>
+                  <td className="px-4 py-4 text-sm text-slate-300">{attribute.active ? t("common.yes") : t("common.no")}</td>
                   <td className="px-4 py-4 text-sm text-slate-300">{attribute.usageCount}</td>
                   <td className="px-4 py-4 text-sm text-slate-300">{attribute.sortOrder}</td>
                   <td className="w-40 px-4 py-4 text-right">
@@ -471,7 +474,7 @@ export default function CategoryAttributesManager({
         <section className="rounded-[28px] border border-white/10 bg-slate-950/95 p-6 shadow-panel">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Category Attribute</p>
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">{t("attributes.titleShort")}</p>
               <h3 id={titleId} className="mt-2 text-2xl font-semibold text-white">
                 {editingAttribute ? "Editar atributo" : "Nuevo atributo"}
               </h3>
@@ -529,7 +532,7 @@ export default function CategoryAttributesManager({
                 >
                   {CATEGORY_ATTRIBUTE_TYPES.map((type) => (
                     <option key={type} value={type} className="bg-slate-900">
-                      {type}
+                      {tCategoryAttributeType(type)}
                     </option>
                   ))}
                 </select>

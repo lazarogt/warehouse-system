@@ -1,5 +1,6 @@
 import MotionButton from "./MotionButton";
 import Modal from "./Modal";
+import { t } from "../i18n";
 
 type ConfirmDialogProps = {
   open: boolean;
@@ -7,6 +8,7 @@ type ConfirmDialogProps = {
   description: string;
   confirmLabel: string;
   cancelLabel?: string;
+  errorMessage?: string | null;
   confirming?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -17,7 +19,8 @@ export default function ConfirmDialog({
   title,
   description,
   confirmLabel,
-  cancelLabel = "Cancelar",
+  cancelLabel = t("common.cancel"),
+  errorMessage = null,
   confirming = false,
   onCancel,
   onConfirm,
@@ -28,11 +31,16 @@ export default function ConfirmDialog({
     <Modal open={open} onClose={onCancel} titleId={titleId}>
       <section className="rounded-[28px] border border-white/10 bg-slate-950/95 p-6 shadow-panel">
         <div>
-          <p className="text-xs uppercase tracking-[0.24em] text-rose-200">Confirmacion</p>
+          <p className="text-xs uppercase tracking-[0.24em] text-rose-200">{t("common.confirm")}</p>
           <h3 id={titleId} className="mt-2 text-2xl font-semibold text-white">
             {title}
           </h3>
           <p className="mt-3 text-sm leading-7 text-slate-300">{description}</p>
+          {errorMessage ? (
+            <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+              {errorMessage}
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-6 flex flex-wrap gap-3">
@@ -42,7 +50,7 @@ export default function ConfirmDialog({
             disabled={confirming}
             onClick={onConfirm}
           >
-            {confirming ? "Procesando..." : confirmLabel}
+            {confirming ? t("loading.processing") : confirmLabel}
           </MotionButton>
 
           <MotionButton

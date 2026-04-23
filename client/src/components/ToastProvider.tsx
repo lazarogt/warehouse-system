@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { t } from "../i18n";
 
 type ToastType = "success" | "error";
 
@@ -67,11 +68,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
               <button
                 type="button"
-                aria-label="Cerrar notificacion"
+                aria-label={t("notifications.close")}
                 className="ui-button rounded-full border border-white/10 px-2 py-1 text-xs text-white/80 hover:bg-white/10"
                 onClick={() => removeToast(toast.id)}
               >
-                Cerrar
+                {t("common.close")}
               </button>
             </div>
           </div>

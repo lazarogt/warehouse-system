@@ -27,13 +27,13 @@ window.setTimeout(hideBootSplash, 4_000);
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ToastProvider>
-      <DataProviderRoot apiBaseUrl={getApiBaseUrl()}>
-        <AuthProvider>
-          <WarehouseProvider>
+      <WarehouseProvider>
+        <DataProviderRoot apiBaseUrl={getApiBaseUrl()}>
+          <AuthProvider>
             <App />
-          </WarehouseProvider>
-        </AuthProvider>
-      </DataProviderRoot>
+          </AuthProvider>
+        </DataProviderRoot>
+      </WarehouseProvider>
     </ToastProvider>
   </React.StrictMode>,
 );

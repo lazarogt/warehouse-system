@@ -8,9 +8,11 @@ import type {
   Warehouse,
   WarehouseLocation,
 } from "../../../shared/src";
+import { t, tTransferStatus } from "../i18n";
 import { useAuth } from "../auth/AuthProvider";
-import { createApiClient, getErrorMessage, saveDownloadedFile } from "../lib/api";
+import { getErrorMessage, saveDownloadedFile } from "../lib/api";
 import { safeArray } from "../lib/format";
+import { useDataProvider } from "../services/data-provider";
 import ConfirmDialog from "./ConfirmDialog";
 import MotionButton from "./MotionButton";
 import SectionLoader from "./SectionLoader";
@@ -65,7 +67,7 @@ const initialForm: TransferForm = {
 };
 
 export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) {
-  const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
+  const { http } = useDataProvider();
   const { user: currentUser } = useAuth();
   const { notify } = useToast();
   const [state, setState] = useState<TransfersState>(initialState);
@@ -79,10 +81,10 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
   const loadData = useCallback(async () => {
     try {
       const [warehouses, locations, products, transfers] = await Promise.all([
-        api.get<Warehouse[]>("/warehouses"),
-        api.get<WarehouseLocation[]>("/locations"),
-        api.get<ProductListResponse>("/products?page=1&pageSize=100"),
-        api.get<StockTransfer[]>("/transfers"),
+        http.get<Warehouse[]>("/warehouses"),
+        http.get<WarehouseLocation[]>("/locations"),
+        http.get<ProductListResponse>("/products?page=1&pageSize=100"),
+        http.get<StockTransfer[]>("/transfers"),
       ]);
 
       setState({
@@ -98,10 +100,10 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
       setState((current) => ({
         ...current,
         loading: false,
-        error: error instanceof Error ? error.message : "No se pudieron cargar las transferencias.",
+        error: error instanceof Error ? error.message : t("transfers.createError"),
       }));
     }
-  }, [api]);
+  }, [http]);
 
   useEffect(() => {
     void loadData();
@@ -146,8 +148,8 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
     if (!formValues.fromWarehouseId || !formValues.toWarehouseId || !formValues.productId) {
       notify({
         type: "error",
-        title: "Formulario incompleto",
-        message: "Selecciona origen, destino y producto.",
+        title: t("common.error"),
+        message: t("transfers.formIncomplete"),
       });
       return;
     }
@@ -169,20 +171,20 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
     };
 
     try {
-      await api.post("/transfers", payload);
+      await http.post("/transfers", payload);
       setFormValues(initialForm);
       notify({
         type: "success",
-        title: "Transferencia creada",
-        message: "La solicitud quedo registrada en estado pendiente.",
+        title: t("transfers.createSuccess"),
+        message: t("transfers.createSuccessText"),
       });
       await loadData();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "No se pudo crear la transferencia.";
+        error instanceof Error ? error.message : t("transfers.createError");
       notify({
         type: "error",
-        title: "No se pudo crear la transferencia",
+        title: t("transfers.createError"),
         message,
       });
       setState((current) => ({ ...current, saving: false, error: message }));
@@ -200,8 +202,8 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
     if (state.transfers.length === 0) {
       notify({
         type: "error",
-        title: "No hay datos para exportar",
-        message: "Todavia no hay transferencias registradas.",
+        title: t("common.error"),
+        message: t("transfers.exportNoData"),
       });
       return;
     }
@@ -209,18 +211,18 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
     setExportingFormat(format);
 
     try {
-      const file = await api.download(`/reports/transfers/export?format=${format}`);
+      const file = await http.download(`/reports/transfers/export?format=${format}`);
       saveDownloadedFile(file);
       notify({
         type: "success",
-        title: "Exportacion generada",
-        message: `Se descargo el reporte de transferencias en ${format.toUpperCase()}.`,
+        title: t("transfers.exportSuccess"),
+        message: format.toUpperCase(),
       });
     } catch (error) {
       notify({
         type: "error",
-        title: "No se pudo exportar transferencias",
-        message: getErrorMessage(error, "Intentalo de nuevo."),
+        title: t("transfers.exportError"),
+        message: getErrorMessage(error, t("app.retry")),
       });
     } finally {
       setExportingFormat(null);
@@ -242,11 +244,11 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
           : `/transfers/${pendingAction.transfer.id}/cancel`;
 
     try {
-      await api.patch(path, {});
+      await http.patch(path, {});
       notify({
         type: "success",
-        title: "Transferencia actualizada",
-        message: `La transferencia #${pendingAction.transfer.id} cambio a ${pendingAction.action}.`,
+        title: t("transfers.statusUpdated"),
+        message: `#${pendingAction.transfer.id}`,
       });
       setPendingAction(null);
       await loadData();
@@ -254,12 +256,12 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
       setState((current) => ({
         ...current,
         saving: false,
-        error: error instanceof Error ? error.message : "No se pudo actualizar la transferencia.",
+        error: error instanceof Error ? error.message : t("transfers.invalidStatusChange"),
       }));
       notify({
         type: "error",
-        title: "No se pudo actualizar la transferencia",
-        message: error instanceof Error ? error.message : "Intentalo de nuevo.",
+        title: t("transfers.invalidStatusChange"),
+        message: error instanceof Error ? error.message : t("app.retry"),
       });
       return;
     }
@@ -268,7 +270,7 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
   };
 
   if (state.loading) {
-    return <SectionLoader label="Cargando transferencias..." />;
+    return <SectionLoader label={t("transfers.loading")} />;
   }
 
   return (
@@ -281,41 +283,39 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
 
       <div className="grid gap-6 xl:grid-cols-[0.95fr,1.05fr]">
         <section className="rounded-[28px] border border-white/10 bg-slate-950/55 p-6 shadow-panel">
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Transferencias</p>
-          <h3 className="mt-2 text-2xl font-semibold text-white">Mover stock con trazabilidad</h3>
-          <p className="mt-2 text-sm text-slate-400">
-            Traslada producto entre almacenes o ubicaciones internas sin perder consistencia.
-          </p>
+          <p className="text-xs uppercase tracking-[0.25em] text-slate-400">{t("sections.transferencias.label")}</p>
+          <h3 className="mt-2 text-2xl font-semibold text-white">{t("transfers.moveTitle")}</h3>
+          <p className="mt-2 text-sm text-slate-400">{t("transfers.subtitle")}</p>
 
           {canExportReports && (
             <div className="mt-6 flex flex-wrap gap-3">
               <MotionButton
-                aria-label="Exportar transferencias en Excel"
+                aria-label={t("common.exportExcel")}
                 onClick={() => void handleExport("excel")}
                 className="rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 text-sm font-medium text-cyan-100 hover:bg-cyan-500/20"
               >
-                Exportar Excel
+                {t("common.exportExcel")}
               </MotionButton>
               <MotionButton
-                aria-label="Exportar transferencias en PDF"
+                aria-label={t("common.exportPdf")}
                 onClick={() => void handleExport("pdf")}
                 className="rounded-2xl border border-orange-400/20 bg-orange-500/10 px-4 py-3 text-sm font-medium text-orange-100 hover:bg-orange-500/20"
               >
-                Exportar PDF
+                {t("common.exportPdf")}
               </MotionButton>
               <MotionButton
-                aria-label="Exportar transferencias en ODF"
+                aria-label={t("common.exportOdf")}
                 onClick={() => void handleExport("odf")}
                 className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-slate-100 hover:bg-white/10"
               >
-                Exportar ODF
+                {t("common.exportOdf")}
               </MotionButton>
             </div>
           )}
 
           {!canCreate && (
             <div className="mt-6 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4 text-sm text-amber-50">
-              Tu rol actual solo puede consultar transferencias.
+              {t("transfers.permissions")}
             </div>
           )}
 
@@ -566,7 +566,7 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
                               : "bg-amber-500/15 text-amber-100"
                       }`}
                     >
-                      {transfer.status}
+                          {tTransferStatus(transfer.status)}
                     </span>
 
                     {canApprove && transfer.status === "pending" && (
@@ -608,13 +608,13 @@ export default function TransfersSection({ apiBaseUrl }: TransfersSectionProps) 
 
       <ConfirmDialog
         open={Boolean(pendingAction)}
-        title="Confirmar accion"
+        title={t("transfers.actionConfirm")}
         description={
           pendingAction
             ? `Vas a ${pendingAction.action} la transferencia #${pendingAction.transfer.id}.`
             : ""
         }
-        confirmLabel="Confirmar"
+        confirmLabel={t("common.confirm")}
         confirming={false}
         onCancel={() => setPendingAction(null)}
         onConfirm={() => void handleTransferAction()}

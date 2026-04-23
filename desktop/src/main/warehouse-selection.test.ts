@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import {
   parseStoredWarehouseId,
@@ -10,12 +10,14 @@ const warehouses = [
     id: 3,
     name: "Central",
     location: "Centro",
+    isActive: true,
     createdAt: "2026-04-20T10:00:00.000Z",
   },
   {
     id: 8,
     name: "Norte",
     location: "Norte",
+    isActive: true,
     createdAt: "2026-04-20T11:00:00.000Z",
   },
 ];

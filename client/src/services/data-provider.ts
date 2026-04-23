@@ -1,6 +1,7 @@
 import {
   createElement,
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -23,11 +24,48 @@ import type {
   StockMovement as DesktopStockMovement,
   Warehouse as DesktopWarehouse,
 } from "../../../shared/src/types/desktop-warehouse-ipc";
+import { useWarehouseContext } from "../context/WarehouseContext";
 import { ApiError, createApiClient } from "../lib/api";
+
+export const OFFLINE_MODE_MESSAGE = "Modo sin conexión activo";
+
+export type WarehouseScopedProduct = Product & {
+  warehouseId?: number | null;
+  warehouseName?: string | null;
+};
+
+type WarehouseScopedProductListResponse = Omit<ProductListResponse, "items"> & {
+  items: WarehouseScopedProduct[];
+};
+
+type DownloadResult = Awaited<ReturnType<ReturnType<typeof createApiClient>["download"]>>;
+
+type HttpClient = {
+  get: <T,>(path: string) => Promise<T>;
+  post: <T,>(path: string, body?: unknown) => Promise<T>;
+  put: <T,>(path: string, body: unknown) => Promise<T>;
+  patch: <T,>(path: string, body: unknown) => Promise<T>;
+  delete: (path: string) => Promise<void>;
+  download: (path: string) => Promise<DownloadResult>;
+};
+
+type InventorySnapshot = {
+  lowStockAlerts: LowStockAlert[];
+  locations: WarehouseLocation[];
+  movements: StockMovement[];
+  products: WarehouseScopedProduct[];
+  stock: StockLevel[];
+  warehouses: Warehouse[];
+};
+
+type RawInventorySnapshot = Omit<InventorySnapshot, "lowStockAlerts" | "products"> & {
+  products: Product[];
+};
 
 type DataProviderContextValue = {
   apiBaseUrl: string;
   hasDesktopFallback: boolean;
+  http: HttpClient;
   isOffline: boolean;
   setOfflineFromFailure: () => void;
   recheckBackendAvailability: () => Promise<boolean>;
@@ -37,21 +75,15 @@ type DataProviderContextValue = {
     totalProducts: number;
     totalUsers: number;
   }>;
-  getInventorySnapshot: () => Promise<{
-    lowStockAlerts: LowStockAlert[];
-    locations: WarehouseLocation[];
-    movements: StockMovement[];
-    products: Product[];
-    stock: StockLevel[];
-    warehouses: Warehouse[];
-  }>;
-  getLowStockAlerts: () => Promise<LowStockAlert[]>;
-  getLowStockCount: () => Promise<number>;
+  getInventorySnapshot: (options?: { warehouseId?: number }) => Promise<InventorySnapshot>;
+  getLowStockAlerts: (options?: { warehouseId?: number }) => Promise<LowStockAlert[]>;
+  getLowStockCount: (options?: { warehouseId?: number }) => Promise<number>;
   listProducts: (params?: {
     page?: number;
     pageSize?: number;
     search?: string;
-  }) => Promise<ProductListResponse>;
+    warehouseId?: number;
+  }) => Promise<WarehouseScopedProductListResponse>;
   lookupProduct: (query: string) => Promise<Product>;
   postInventoryMovement: (payload: StockMovementInput) => Promise<void>;
 };
@@ -61,13 +93,17 @@ type DataProviderRootProps = {
   children: ReactNode;
 };
 
-const OFFLINE_LOW_STOCK_THRESHOLD = 10;
 const BACKEND_PING_INTERVAL_MS = 30_000;
+const LOCAL_MINIMUM_STOCK = 10;
 
 const DataProviderContext = createContext<DataProviderContextValue | null>(null);
 
-function buildOfflineUserFacingError(fallbackMessage: string, error: unknown): Error {
-  return new Error(error instanceof Error ? error.message : fallbackMessage);
+function buildOfflineUserFacingError(): Error {
+  return new Error(OFFLINE_MODE_MESSAGE);
+}
+
+function isBrowserOffline(): boolean {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
 }
 
 function mapDesktopProductToShared(product: DesktopProduct): Product {
@@ -80,7 +116,7 @@ function mapDesktopProductToShared(product: DesktopProduct): Product {
     categoryId: 0,
     categoryName: "Catalogo local",
     price: product.price,
-    minimumStock: 0,
+    minimumStock: LOCAL_MINIMUM_STOCK,
     currentStock: product.stock,
     attributes: [],
     createdAt: product.createdAt,
@@ -105,6 +141,10 @@ function mapDesktopMovementToShared(
 ): StockMovement {
   const product = products.find((item) => item.id === movement.productId);
   const warehouse = warehouses.find((item) => item.id === movement.warehouseId);
+  const observationParts = [
+    movement.metadata?.customer ? `Cliente: ${movement.metadata.customer}` : null,
+    movement.metadata?.notes ?? null,
+  ].filter(Boolean);
 
   return {
     id: movement.id,
@@ -120,28 +160,96 @@ function mapDesktopMovementToShared(
     type: movement.type === "in" ? "entry" : "exit",
     quantity: movement.quantity,
     movementDate: movement.date,
-    observation: null,
+    observation: observationParts.length > 0 ? observationParts.join(" · ") : null,
     createdAt: movement.date,
   };
 }
 
-function buildOfflineLowStockAlerts(products: Product[]): LowStockAlert[] {
+function createStockLevelLookup(stock: StockLevel[]) {
+  return new Map(stock.map((item) => [`${item.warehouseId}:${item.productId}`, item.quantity]));
+}
+
+function buildScopedProducts(
+  products: Product[],
+  warehouses: Warehouse[],
+  stock: StockLevel[],
+  warehouseId?: number,
+): WarehouseScopedProduct[] {
+  const stockLookup = createStockLevelLookup(stock);
+
+  if (warehouseId !== undefined) {
+    const scopedWarehouse = warehouses.find((warehouse) => warehouse.id === warehouseId) ?? null;
+
+    return products.map((product) => ({
+      ...product,
+      currentStock: stockLookup.get(`${warehouseId}:${product.id}`) ?? 0,
+      warehouseId,
+      warehouseName: scopedWarehouse?.name ?? null,
+    }));
+  }
+
+  if (warehouses.length === 0) {
+    return products.map((product) => ({
+      ...product,
+      warehouseId: null,
+      warehouseName: null,
+    }));
+  }
+
+  return warehouses.flatMap((warehouse) =>
+    products.map((product) => ({
+      ...product,
+      currentStock: stockLookup.get(`${warehouse.id}:${product.id}`) ?? 0,
+      warehouseId: warehouse.id,
+      warehouseName: warehouse.name,
+    })),
+  );
+}
+
+function buildLowStockAlerts(products: Product[]): LowStockAlert[] {
   return products
-    .filter((product) => product.currentStock <= OFFLINE_LOW_STOCK_THRESHOLD)
+    .filter((product) => product.currentStock <= product.minimumStock)
     .map((product) => ({
       ...product,
-      shortage: Math.max(OFFLINE_LOW_STOCK_THRESHOLD - product.currentStock, 0),
+      shortage: Math.max(product.minimumStock - product.currentStock, 0),
     }));
 }
 
-async function buildOfflineInventorySnapshot(): Promise<{
-  lowStockAlerts: LowStockAlert[];
-  locations: WarehouseLocation[];
-  movements: StockMovement[];
-  products: Product[];
-  stock: StockLevel[];
-  warehouses: Warehouse[];
-}> {
+function buildScopedInventorySnapshot(
+  rawSnapshot: RawInventorySnapshot,
+  warehouseId?: number,
+): InventorySnapshot {
+  const warehouses =
+    warehouseId === undefined
+      ? rawSnapshot.warehouses
+      : rawSnapshot.warehouses.filter((warehouse) => warehouse.id === warehouseId);
+  const locations =
+    warehouseId === undefined
+      ? rawSnapshot.locations
+      : rawSnapshot.locations.filter((location) => location.warehouseId === warehouseId);
+  const stock =
+    warehouseId === undefined
+      ? rawSnapshot.stock
+      : rawSnapshot.stock.filter((item) => item.warehouseId === warehouseId);
+  const movements =
+    warehouseId === undefined
+      ? rawSnapshot.movements
+      : rawSnapshot.movements.filter((movement) => movement.warehouseId === warehouseId);
+  const products = buildScopedProducts(rawSnapshot.products, warehouses, rawSnapshot.stock, warehouseId);
+
+  return {
+    lowStockAlerts: buildLowStockAlerts(
+      warehouseId === undefined ? rawSnapshot.products : products,
+    ),
+    locations,
+    movements,
+    products,
+    stock,
+    warehouses,
+  };
+}
+
+async function buildLocalInventorySnapshot(): Promise<RawInventorySnapshot> {
   const warehouseApi = window.api?.warehouse;
 
   if (!warehouseApi) {
@@ -154,21 +262,13 @@ async function buildOfflineInventorySnapshot(): Promise<{
     warehouseApi.getStockMovements(),
   ]);
 
-  if (!productsResponse.success) {
-    throw new Error(productsResponse.error.message || "No se pudieron cargar productos locales.");
-  }
-
-  if (!warehousesResponse.success) {
-    throw new Error(warehousesResponse.error.message || "No se pudieron cargar almacenes locales.");
-  }
-
-  if (!movementsResponse.success) {
-    throw new Error(movementsResponse.error.message || "No se pudieron cargar movimientos locales.");
+  if (!productsResponse.success || !warehousesResponse.success || !movementsResponse.success) {
+    throw new Error(OFFLINE_MODE_MESSAGE);
   }
 
   const products = productsResponse.data.map(mapDesktopProductToShared);
   const warehouses = warehousesResponse.data.map(mapDesktopWarehouseToShared);
-  const stockMatrix = await Promise.all(
+  const stock = await Promise.all(
     warehouses.flatMap((warehouse) =>
       products.map(async (product) => {
         const stockResponse = await warehouseApi.getWarehouseStock({
@@ -177,7 +277,7 @@ async function buildOfflineInventorySnapshot(): Promise<{
         });
 
         if (!stockResponse.success) {
-          throw new Error(stockResponse.error.message || "No se pudo cargar stock local.");
+          throw new Error(OFFLINE_MODE_MESSAGE);
         }
 
         return {
@@ -193,49 +293,48 @@ async function buildOfflineInventorySnapshot(): Promise<{
       }),
     ),
   );
-
   const movements = movementsResponse.data
     .map((movement) => mapDesktopMovementToShared(movement, products, warehouses))
     .sort((left, right) => right.movementDate.localeCompare(left.movementDate))
     .slice(0, 12);
 
   return {
-    products,
-    warehouses,
     locations: [],
     movements,
-    stock: stockMatrix,
-    lowStockAlerts: buildOfflineLowStockAlerts(products),
+    products,
+    stock,
+    warehouses,
   };
 }
 
-function filterOfflineProducts(
-  products: Product[],
+function filterProducts(
+  products: WarehouseScopedProduct[],
   params: {
     page?: number;
     pageSize?: number;
     search?: string;
   } = {},
-): ProductListResponse {
+): WarehouseScopedProductListResponse {
   const page = params.page ?? 1;
   const pageSize = params.pageSize ?? (products.length || 1);
   const search = params.search?.trim().toLowerCase() ?? "";
-
   const filteredProducts = search
     ? products.filter((product) => {
+        const warehouseName = product.warehouseName?.toLowerCase() ?? "";
+
         return (
           product.name.toLowerCase().includes(search) ||
           (product.sku ?? "").toLowerCase().includes(search) ||
-          (product.barcode ?? "").toLowerCase().includes(search)
+          (product.barcode ?? "").toLowerCase().includes(search) ||
+          product.categoryName.toLowerCase().includes(search) ||
+          warehouseName.includes(search)
         );
       })
     : products;
-
   const pageStart = Math.max(page - 1, 0) * pageSize;
-  const items = filteredProducts.slice(pageStart, pageStart + pageSize);
 
   return {
-    items,
+    items: filteredProducts.slice(pageStart, pageStart + pageSize),
     page,
     pageSize,
     total: filteredProducts.length,
@@ -244,21 +343,73 @@ function filterOfflineProducts(
 
 export function DataProviderRoot({ apiBaseUrl, children }: DataProviderRootProps) {
   const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
-  const [isOffline, setIsOffline] = useState(false);
+  const { selectedWarehouseId, warehouseViewMode } = useWarehouseContext();
   const hasDesktopFallback = typeof window !== "undefined" && Boolean(window.api?.warehouse);
+  const [isOffline, setIsOffline] = useState(() => hasDesktopFallback && isBrowserOffline());
   const statusRequestRef = useRef<Promise<boolean> | null>(null);
 
-  const recheckBackendAvailability = async () => {
+  const resolveWarehouseId = useCallback(
+    (warehouseId?: number) => {
+      if (warehouseId !== undefined) {
+        return warehouseId;
+      }
+
+      return warehouseViewMode === "selected" ? selectedWarehouseId ?? undefined : undefined;
+    },
+    [selectedWarehouseId, warehouseViewMode],
+  );
+
+  const runHttpRequest = useCallback(
+    async <T,>(request: () => Promise<T>) => {
+      if (hasDesktopFallback && (isOffline || isBrowserOffline())) {
+        setIsOffline(true);
+        throw buildOfflineUserFacingError();
+      }
+
+      try {
+        const response = await request();
+        setIsOffline(false);
+        return response;
+      } catch (error) {
+        if (hasDesktopFallback && error instanceof ApiError && error.status === 0) {
+          setIsOffline(true);
+          throw buildOfflineUserFacingError();
+        }
+
+        throw error;
+      }
+    },
+    [hasDesktopFallback, isOffline],
+  );
+
+  const http = useMemo<HttpClient>(
+    () => ({
+      get: (path) => runHttpRequest(() => api.get(path)),
+      post: (path, body) => runHttpRequest(() => api.post(path, body)),
+      put: (path, body) => runHttpRequest(() => api.put(path, body)),
+      patch: (path, body) => runHttpRequest(() => api.patch(path, body)),
+      delete: (path) => runHttpRequest(() => api.delete(path)),
+      download: (path) => runHttpRequest(() => api.download(path)),
+    }),
+    [api, runHttpRequest],
+  );
+
+  const recheckBackendAvailability = useCallback(async () => {
     if (statusRequestRef.current) {
       return statusRequestRef.current;
     }
 
     const request = (async () => {
+      if (hasDesktopFallback && isBrowserOffline()) {
+        setIsOffline(true);
+        return false;
+      }
+
       try {
         await api.get("/health");
         setIsOffline(false);
         return true;
-      } catch (error) {
+      } catch {
         if (hasDesktopFallback) {
           setIsOffline(true);
         }
@@ -271,7 +422,7 @@ export function DataProviderRoot({ apiBaseUrl, children }: DataProviderRootProps
 
     statusRequestRef.current = request;
     return request;
-  };
+  }, [api, hasDesktopFallback]);
 
   useEffect(() => {
     if (!hasDesktopFallback) {
@@ -294,18 +445,40 @@ export function DataProviderRoot({ apiBaseUrl, children }: DataProviderRootProps
       window.clearInterval(intervalHandle);
       window.removeEventListener("online", handleOnline);
     };
-  }, [hasDesktopFallback]);
+  }, [hasDesktopFallback, recheckBackendAvailability]);
 
-  const getOfflineInventorySnapshot = async () => {
-    try {
-      return await buildOfflineInventorySnapshot();
-    } catch (error) {
-      throw buildOfflineUserFacingError("No se pudieron cargar los datos locales.", error);
+  const getRawInventorySnapshot = useCallback(async (): Promise<RawInventorySnapshot> => {
+    if (hasDesktopFallback) {
+      return buildLocalInventorySnapshot();
     }
-  };
 
-  const lookupOfflineProduct = async (query: string) => {
-    const snapshot = await getOfflineInventorySnapshot();
+    const [productsResponse, warehouses, locations, movements, stock] = await Promise.all([
+      http.get<ProductListResponse>("/products?page=1&pageSize=100"),
+      http.get<Warehouse[]>("/warehouses"),
+      http.get<WarehouseLocation[]>("/locations"),
+      http.get<StockMovement[]>("/inventory/movements?limit=12"),
+      http.get<StockLevel[]>("/inventory/stock"),
+    ]);
+
+    return {
+      locations,
+      movements,
+      products: productsResponse.items,
+      stock,
+      warehouses,
+    };
+  }, [hasDesktopFallback, http]);
+
+  const getInventorySnapshot = useCallback(
+    async (options?: { warehouseId?: number }) => {
+      const rawSnapshot = await getRawInventorySnapshot();
+      return buildScopedInventorySnapshot(rawSnapshot, resolveWarehouseId(options?.warehouseId));
+    },
+    [getRawInventorySnapshot, resolveWarehouseId],
+  );
+
+  const lookupOfflineProduct = useCallback(async (query: string) => {
+    const snapshot = await getRawInventorySnapshot();
     const normalizedQuery = query.trim().toLowerCase();
     const match = snapshot.products.find((product) => {
       return (
@@ -320,13 +493,13 @@ export function DataProviderRoot({ apiBaseUrl, children }: DataProviderRootProps
     }
 
     return match;
-  };
+  }, [getRawInventorySnapshot]);
 
-  const postOfflineInventoryMovement = async (payload: StockMovementInput) => {
+  const postOfflineInventoryMovement = useCallback(async (payload: StockMovementInput) => {
     const warehouseApi = window.api?.warehouse;
 
     if (!warehouseApi) {
-      throw new Error("La capa local no esta disponible para registrar el movimiento.");
+      throw new Error(OFFLINE_MODE_MESSAGE);
     }
 
     const response = await warehouseApi.createStockMovement({
@@ -338,197 +511,89 @@ export function DataProviderRoot({ apiBaseUrl, children }: DataProviderRootProps
     });
 
     if (!response.success) {
-      throw new Error(response.error.message || "No se pudo registrar el movimiento local.");
+      throw new Error(response.error.message || OFFLINE_MODE_MESSAGE);
     }
-  };
+  }, []);
 
-  const getInventorySnapshot = async () => {
-    if (isOffline && hasDesktopFallback) {
-      return getOfflineInventorySnapshot();
-    }
+  const listProducts = useCallback(
+    async (params?: {
+      page?: number;
+      pageSize?: number;
+      search?: string;
+      warehouseId?: number;
+    }) => {
+      const snapshot = await getInventorySnapshot({
+        warehouseId: params?.warehouseId,
+      });
+      return filterProducts(snapshot.products, params);
+    },
+    [getInventorySnapshot],
+  );
 
-    try {
-      const [productsResponse, warehouses, locations, movements, stock, lowStockAlerts] =
-        await Promise.all([
-          api.get<ProductListResponse>("/products?page=1&pageSize=100"),
-          api.get<Warehouse[]>("/warehouses"),
-          api.get<WarehouseLocation[]>("/locations"),
-          api.get<StockMovement[]>("/inventory/movements?limit=12"),
-          api.get<StockLevel[]>("/inventory/stock"),
-          api.get<LowStockAlert[]>("/alerts/low-stock"),
-        ]);
+  const lookupProduct = useCallback(
+    async (query: string) => {
+      const trimmedQuery = query.trim();
 
-      setIsOffline(false);
-
-      return {
-        lowStockAlerts,
-        locations,
-        movements,
-        products: productsResponse.items,
-        stock,
-        warehouses,
-      };
-    } catch (error) {
-      if (hasDesktopFallback && error instanceof ApiError && error.status === 0) {
-        setIsOffline(true);
-        return getOfflineInventorySnapshot();
-      }
-
-      throw buildOfflineUserFacingError("No se pudieron cargar los datos de inventario.", error);
-    }
-  };
-
-  const listProducts = async (params?: {
-    page?: number;
-    pageSize?: number;
-    search?: string;
-  }) => {
-    if (isOffline && hasDesktopFallback) {
-      const snapshot = await getOfflineInventorySnapshot();
-      return filterOfflineProducts(snapshot.products, params);
-    }
-
-    const searchParams = new URLSearchParams();
-
-    if (params?.page) {
-      searchParams.set("page", String(params.page));
-    }
-
-    if (params?.pageSize) {
-      searchParams.set("pageSize", String(params.pageSize));
-    }
-
-    if (params?.search?.trim()) {
-      searchParams.set("search", params.search.trim());
-    }
-
-    try {
-      const response = await api.get<ProductListResponse>(
-        `/products${searchParams.size > 0 ? `?${searchParams.toString()}` : ""}`,
-      );
-      setIsOffline(false);
-      return response;
-    } catch (error) {
-      if (hasDesktopFallback && error instanceof ApiError && error.status === 0) {
-        setIsOffline(true);
-        const snapshot = await getOfflineInventorySnapshot();
-        return filterOfflineProducts(snapshot.products, params);
-      }
-
-      throw buildOfflineUserFacingError("No se pudieron cargar los productos.", error);
-    }
-  };
-
-  const lookupProduct = async (query: string) => {
-    const trimmedQuery = query.trim();
-
-    if (isOffline && hasDesktopFallback) {
-      return lookupOfflineProduct(trimmedQuery);
-    }
-
-    try {
-      const isBarcode = /^\d+$/.test(trimmedQuery);
-      const response = await api.get<Product>(
-        `/products/lookup?${isBarcode ? `barcode=${encodeURIComponent(trimmedQuery)}` : `sku=${encodeURIComponent(trimmedQuery)}`}`,
-      );
-      setIsOffline(false);
-      return response;
-    } catch (error) {
-      if (hasDesktopFallback && error instanceof ApiError && error.status === 0) {
-        setIsOffline(true);
+      if (hasDesktopFallback) {
         return lookupOfflineProduct(trimmedQuery);
       }
 
-      throw buildOfflineUserFacingError("No se encontro el producto.", error);
-    }
-  };
+      const isBarcode = /^\d+$/.test(trimmedQuery);
+      return http.get<Product>(
+        `/products/lookup?${isBarcode ? `barcode=${encodeURIComponent(trimmedQuery)}` : `sku=${encodeURIComponent(trimmedQuery)}`}`,
+      );
+    },
+    [hasDesktopFallback, http, lookupOfflineProduct],
+  );
 
-  const postInventoryMovement = async (payload: StockMovementInput) => {
-    if (isOffline && hasDesktopFallback) {
-      return postOfflineInventoryMovement(payload);
-    }
-
-    try {
-      await api.post("/inventory/movements", payload);
-      setIsOffline(false);
-    } catch (error) {
-      if (hasDesktopFallback && error instanceof ApiError && error.status === 0) {
-        setIsOffline(true);
+  const postInventoryMovement = useCallback(
+    async (payload: StockMovementInput) => {
+      if (hasDesktopFallback) {
         return postOfflineInventoryMovement(payload);
       }
 
-      throw buildOfflineUserFacingError("No se pudo registrar el movimiento.", error);
-    }
-  };
+      await http.post("/inventory/movements", payload);
+    },
+    [hasDesktopFallback, http, postOfflineInventoryMovement],
+  );
 
-  const getLowStockAlerts = async () => {
-    if (isOffline && hasDesktopFallback) {
-      const snapshot = await getOfflineInventorySnapshot();
+  const getLowStockAlerts = useCallback(
+    async (options?: { warehouseId?: number }) => {
+      const snapshot = await getInventorySnapshot(options);
       return snapshot.lowStockAlerts;
-    }
+    },
+    [getInventorySnapshot],
+  );
 
-    try {
-      const response = await api.get<LowStockAlert[]>("/alerts/low-stock");
-      setIsOffline(false);
-      return response;
-    } catch (error) {
-      if (hasDesktopFallback && error instanceof ApiError && error.status === 0) {
-        setIsOffline(true);
-        const snapshot = await getOfflineInventorySnapshot();
-        return snapshot.lowStockAlerts;
-      }
+  const getLowStockCount = useCallback(
+    async (options?: { warehouseId?: number }) => {
+      const alerts = await getLowStockAlerts(options);
+      return alerts.length;
+    },
+    [getLowStockAlerts],
+  );
 
-      throw buildOfflineUserFacingError("No se pudieron cargar las alertas.", error);
-    }
-  };
+  const getDashboardSnapshot = useCallback(
+    async (role?: string) => {
+      const snapshot = await getInventorySnapshot();
 
-  const getLowStockCount = async () => {
-    const alerts = await getLowStockAlerts();
-    return alerts.length;
-  };
-
-  const getDashboardSnapshot = async (role?: string) => {
-    if (isOffline && hasDesktopFallback) {
-      const snapshot = await getOfflineInventorySnapshot();
       return {
         lowStockAlerts: snapshot.lowStockAlerts,
         recentMovements: snapshot.movements,
-        totalProducts: snapshot.products.length,
-        totalUsers: role === "admin" ? 1 : 0,
+        totalProducts:
+          warehouseViewMode === "selected"
+            ? snapshot.products.length
+            : new Set(snapshot.products.map((product) => product.id)).size,
+        totalUsers:
+          hasDesktopFallback || role !== "admin"
+            ? role === "admin"
+              ? 1
+              : 0
+            : (await http.get<unknown[]>("/users")).length,
       };
-    }
-
-    try {
-      const [users, products, movements, lowStockAlerts] = await Promise.all([
-        role === "admin" ? api.get<unknown[]>("/users") : Promise.resolve([]),
-        api.get<ProductListResponse>("/products?page=1&pageSize=100"),
-        api.get<StockMovement[]>("/inventory/movements?limit=12"),
-        api.get<LowStockAlert[]>("/alerts/low-stock"),
-      ]);
-
-      setIsOffline(false);
-
-      return {
-        lowStockAlerts,
-        recentMovements: movements,
-        totalProducts: products.total,
-        totalUsers: users.length,
-      };
-    } catch (error) {
-      if (hasDesktopFallback && error instanceof ApiError && error.status === 0) {
-        setIsOffline(true);
-        const snapshot = await getOfflineInventorySnapshot();
-        return {
-          lowStockAlerts: snapshot.lowStockAlerts,
-          recentMovements: snapshot.movements,
-          totalProducts: snapshot.products.length,
-          totalUsers: role === "admin" ? 1 : 0,
-        };
-      }
-
-      throw buildOfflineUserFacingError("No se pudieron cargar los datos del panel.", error);
-    }
-  };
+    },
+    [getInventorySnapshot, hasDesktopFallback, http, warehouseViewMode],
+  );
 
   const value = useMemo<DataProviderContextValue>(
     () => ({
@@ -538,6 +603,7 @@ export function DataProviderRoot({ apiBaseUrl, children }: DataProviderRootProps
       getLowStockAlerts,
       getLowStockCount,
       hasDesktopFallback,
+      http,
       isOffline,
       listProducts,
       lookupProduct,
@@ -549,7 +615,20 @@ export function DataProviderRoot({ apiBaseUrl, children }: DataProviderRootProps
         }
       },
     }),
-    [apiBaseUrl, hasDesktopFallback, isOffline],
+    [
+      apiBaseUrl,
+      getDashboardSnapshot,
+      getInventorySnapshot,
+      getLowStockAlerts,
+      getLowStockCount,
+      hasDesktopFallback,
+      http,
+      isOffline,
+      listProducts,
+      lookupProduct,
+      postInventoryMovement,
+      recheckBackendAvailability,
+    ],
   );
 
   return createElement(DataProviderContext.Provider, {

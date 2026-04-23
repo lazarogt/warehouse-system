@@ -1,7 +1,7 @@
 {
   "name": "warehouse-system-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.4.0",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json && node ./scripts/prepare-renderer.mjs",
@@ -14,23 +14,30 @@
     "dist:linux": "npm run build && node ./node_modules/electron-builder/cli.js --config electron-builder.yml --linux AppImage --publish never",
     "release": "npm run build && node ./node_modules/electron-builder/cli.js --config electron-builder.yml --publish always",
     "release:verify-version": "node ./scripts/assert-release-version.mjs",
-    "postinstall": "node ./node_modules/electron-builder/cli.js install-app-deps",
+    "rebuild:native": "npx electron-rebuild -f -w better-sqlite3",
+    "postinstall": "npm run rebuild:native",
     "start": "electron .",
-    "test": "node --import tsx --test \"src/**/*.test.ts\""
+    "test": "ELECTRON_RUN_AS_NODE=1 npx electron ./node_modules/vitest/vitest.mjs run",
+    "test:node": "vitest"
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
-    "electron-updater": "^6.8.3"
+    "electron-updater": "^6.8.3",
+    "exceljs": "^4.4.0",
+    "pdfkit": "^0.17.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.1",
+    "@types/pdfkit": "^0.17.3",
     "cross-env": "^7.0.3",
     "electron": "^35.5.1",
     "electron-builder": "^26.8.1",
+    "electron-rebuild": "^3.2.9",
     "nodemon": "^3.1.10",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
+    "vitest": "^3.2.4",
     "wait-on": "^8.0.3"
   }
 }

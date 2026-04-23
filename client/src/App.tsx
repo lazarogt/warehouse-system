@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
-import { APP_NAME, APP_VERSION } from "../../shared/src";
+import { APP_NAME, APP_VERSION } from "../../shared/src/constants/app";
+import { t, tUserRole } from "./i18n";
 import { useAuth } from "./auth/AuthProvider";
 import AuthGuard from "./components/AuthGuard";
 import MotionButton from "./components/MotionButton";
@@ -43,58 +44,58 @@ type Section = {
 const sections: Section[] = [
   {
     id: "dashboard",
-    label: "Dashboard",
-    description: "Resumen general del sistema y accesos rapidos del panel administrativo.",
+    label: t("sections.dashboard.label"),
+    description: t("sections.dashboard.description"),
   },
   {
     id: "usuarios",
-    label: "Usuarios",
-    description: "Administracion de usuarios, roles y permisos operativos.",
+    label: t("sections.usuarios.label"),
+    description: t("sections.usuarios.description"),
   },
   {
     id: "productos",
-    label: "Productos",
-    description: "Mantenimiento de catalogo, categorias y visibilidad de inventario.",
+    label: t("sections.productos.label"),
+    description: t("sections.productos.description"),
   },
   {
     id: "inventario",
-    label: "Inventario",
-    description: "Consulta consolidada de stock por producto y por almacen.",
+    label: t("sections.inventario.label"),
+    description: t("sections.inventario.description"),
   },
   {
     id: "movimientos",
-    label: "Movimientos",
-    description: "Registro y trazabilidad de entradas y salidas de stock.",
+    label: t("sections.movimientos.label"),
+    description: t("sections.movimientos.description"),
   },
   {
     id: "ubicaciones",
-    label: "Ubicaciones",
-    description: "Gestion de zonas, racks y bins internos por almacen.",
+    label: t("sections.ubicaciones.label"),
+    description: t("sections.ubicaciones.description"),
   },
   {
     id: "transferencias",
-    label: "Transferencias",
-    description: "Traslado interno o entre almacenes con estados y trazabilidad.",
+    label: t("sections.transferencias.label"),
+    description: t("sections.transferencias.description"),
   },
   {
     id: "despacho",
-    label: "Despacho",
-    description: "Salidas operativas hacia destinos manuales con total y control de stock.",
+    label: t("sections.despacho.label"),
+    description: t("sections.despacho.description"),
   },
   {
     id: "ajustes",
-    label: "Ajustes",
-    description: "Correcciones manuales de inventario con motivo obligatorio.",
+    label: t("sections.ajustes.label"),
+    description: t("sections.ajustes.description"),
   },
   {
     id: "conteos",
-    label: "Conteos Cíclicos",
-    description: "Conteos fisicos con diferencias y conciliacion opcional.",
+    label: t("sections.conteos.label"),
+    description: t("sections.conteos.description"),
   },
   {
     id: "configuracion",
-    label: "Configuracion",
-    description: "Ajustes generales del sistema y parametros administrativos.",
+    label: t("sections.configuracion.label"),
+    description: t("sections.configuracion.description"),
   },
 ];
 
@@ -114,7 +115,12 @@ const sectionAccent: Record<SectionId, string> = {
 
 export default function App() {
   const { apiBaseUrl, logout, user: currentUser } = useAuth();
-  const { selectedWarehouse } = useWarehouseContext();
+  const {
+    selectedWarehouse,
+    selectedWarehouseId,
+    warehouseViewMode,
+    selectWarehouseViewMode,
+  } = useWarehouseContext();
   const { getLowStockCount, isOffline } = useDataProvider();
   const { notify } = useToast();
   const [activeSection, setActiveSection] = useState<SectionId>("dashboard");
@@ -174,8 +180,8 @@ export default function App() {
     } catch (error) {
       notify({
         type: "error",
-        title: "No se pudo cerrar la sesion",
-        message: error instanceof Error ? error.message : "Intentalo de nuevo.",
+        title: t("app.noSessionCloseError"),
+        message: error instanceof Error ? error.message : t("app.retry"),
       });
     } finally {
       setLoggingOut(false);
@@ -233,7 +239,7 @@ export default function App() {
       >
         <div className="max-w-3xl">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-orange-200">
-            Seccion activa
+            {t("app.activeSection")}
           </p>
           <h2 className="mt-3 text-3xl font-semibold text-white">{selectedSection.label}</h2>
           <p className="mt-4 text-sm leading-7 text-slate-200 sm:text-base">
@@ -243,21 +249,13 @@ export default function App() {
 
         <div className="mt-8 grid gap-4 lg:grid-cols-2">
           <article className="rounded-[24px] border border-white/10 bg-slate-950/45 p-5">
-            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Main Content</p>
-            <p className="mt-3 text-lg font-semibold text-white">Contenedor dinamico listo</p>
-            <p className="mt-2 text-sm leading-6 text-slate-300">
-              Este bloque representa el area donde se conectaran tablas, formularios y flujos reales
-              de la seccion en fases posteriores.
-            </p>
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">{t("app.mainContent")}</p>
+            <p className="mt-3 text-lg font-semibold text-white">{t("app.sectionPlaceholder")}</p>
           </article>
 
           <article className="rounded-[24px] border border-white/10 bg-white/5 p-5">
-            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Estado UI</p>
-            <p className="mt-3 text-lg font-semibold text-white">Navegacion responsive activa</p>
-            <p className="mt-2 text-sm leading-6 text-slate-300">
-              Sidebar, header y contenido ya responden en mobile y desktop sin depender todavia de
-              un frontend avanzado.
-            </p>
+            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">{t("app.navReady")}</p>
+            <p className="mt-3 text-lg font-semibold text-white">{t("app.navReadyText")}</p>
           </article>
         </div>
       </section>
@@ -284,20 +282,20 @@ export default function App() {
             <div className="flex items-center justify-between lg:block">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.32em] text-orange-300">
-                  Admin Panel
+                  {t("app.adminPanel")}
                 </p>
                 <h1 className="mt-3 text-2xl font-semibold">{APP_NAME}</h1>
                 <p className="mt-2 text-sm leading-6 text-slate-400">
-                  Layout general listo para conectar los modulos del sistema.
+                  {t("app.sidebarReady")}
                 </p>
               </div>
 
               <MotionButton
-                aria-label="Cerrar menu lateral"
+                aria-label={t("common.close")}
                 onClick={() => setSidebarOpen(false)}
                 className="rounded-full border border-white/10 px-3 py-2 text-xs uppercase tracking-[0.22em] text-slate-300 lg:hidden"
               >
-                Cerrar
+                {t("common.close")}
               </MotionButton>
             </div>
 
@@ -310,7 +308,7 @@ export default function App() {
                     key={section.id}
                     type="button"
                     aria-current={isActive ? "page" : undefined}
-                    aria-label={`Ir a la seccion ${section.label}`}
+                    aria-label={section.label}
                     onClick={() => {
                       setActiveSection(section.id);
                       setSidebarOpen(false);
@@ -343,11 +341,9 @@ export default function App() {
             </nav>
 
             <div className="mt-10 rounded-[24px] border border-white/10 bg-white/5 p-4">
-              <p className="text-xs uppercase tracking-[0.26em] text-slate-400">Version</p>
+              <p className="text-xs uppercase tracking-[0.26em] text-slate-400">{t("app.version")}</p>
               <p className="mt-3 text-lg font-semibold text-white">{APP_VERSION}</p>
-              <p className="mt-2 text-sm text-slate-400">
-                Base visual del dashboard preparada para crecer por modulos.
-              </p>
+              <p className="mt-2 text-sm text-slate-400">{t("app.sidebarReady")}</p>
             </div>
           </aside>
 
@@ -356,11 +352,11 @@ export default function App() {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex items-center gap-3">
                   <MotionButton
-                    aria-label="Abrir menu lateral"
+                    aria-label={t("app.menu")}
                     onClick={() => setSidebarOpen(true)}
                     className="inline-flex items-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-slate-200 lg:hidden"
                   >
-                    Menu
+                    {t("app.menu")}
                   </MotionButton>
 
                   <div>
@@ -369,8 +365,8 @@ export default function App() {
                     </p>
                     <p className="mt-1 text-sm text-slate-400">
                       {selectedWarehouse
-                        ? `Operacion rapida en ${selectedWarehouse.name}.`
-                        : "Selecciona un almacen para usar la operacion rapida."}
+                        ? `${t("warehouse.active")}: ${selectedWarehouse.name}`
+                        : t("app.operationReadyEmpty")}
                     </p>
                   </div>
                 </div>
@@ -378,12 +374,39 @@ export default function App() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   {isOffline && (
                     <div className="rounded-full border border-amber-300/20 bg-amber-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-amber-100">
-                      Offline Mode
+                      {t("common.offlineMode")}
                     </div>
                   )}
+                  <div className="inline-flex overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-1">
+                    <button
+                      type="button"
+                      aria-pressed={warehouseViewMode === "selected"}
+                      disabled={!selectedWarehouseId}
+                      onClick={() => selectWarehouseViewMode("selected")}
+                      className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition ${
+                        warehouseViewMode === "selected"
+                          ? "bg-white text-ink"
+                          : "text-slate-300 hover:bg-white/5 hover:text-white"
+                      } disabled:cursor-not-allowed disabled:opacity-50`}
+                    >
+                      {t("common.thisWarehouse")}
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={warehouseViewMode === "all"}
+                      onClick={() => selectWarehouseViewMode("all")}
+                      className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition ${
+                        warehouseViewMode === "all"
+                          ? "bg-white text-ink"
+                          : "text-slate-300 hover:bg-white/5 hover:text-white"
+                      }`}
+                    >
+                      {t("common.allWarehouses")}
+                    </button>
+                  </div>
                   <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                     <p className="text-xs uppercase tracking-[0.22em] text-slate-400">
-                      Usuario logueado
+                      {t("app.userLogged")}
                     </p>
                     <div className="mt-2 flex items-center gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-500 text-sm font-bold text-white">
@@ -397,10 +420,10 @@ export default function App() {
                       </div>
                       <div>
                         <p className="font-medium text-white">
-                          {currentUser?.name ?? "Sin sesion"}
+                          {currentUser?.name ?? t("app.noSession")}
                         </p>
                         <p className="text-sm text-slate-400">
-                          {currentUser?.role ?? "autenticacion requerida"}
+                          {currentUser?.role ? tUserRole(currentUser.role) : t("app.sessionRequired")}
                         </p>
                       </div>
                     </div>
@@ -408,12 +431,12 @@ export default function App() {
 
                   {currentUser && (
                     <MotionButton
-                      aria-label="Cerrar sesion"
+                      aria-label={t("common.logout")}
                       onClick={() => void handleLogout()}
                       disabled={loggingOut}
                       className="rounded-2xl bg-orange-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-400"
                     >
-                      {loggingOut ? "Saliendo..." : "Logout"}
+                      {loggingOut ? `${t("common.processing")}...` : t("common.logout")}
                     </MotionButton>
                   )}
                 </div>

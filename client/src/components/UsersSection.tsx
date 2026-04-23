@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
   CreateUserInput,
   ResetPasswordResponse,
   UpdateUserInput,
   User,
 } from "../../../shared/src";
+import { t } from "../i18n";
 import { useAuth } from "../auth/AuthProvider";
-import { createApiClient } from "../lib/api";
 import { safeArray } from "../lib/format";
+import { useDataProvider } from "../services/data-provider";
 import ConfirmDialog from "./ConfirmDialog";
 import Modal from "./Modal";
 import SectionLoader from "./SectionLoader";
@@ -42,7 +43,7 @@ const initialState: UsersSectionState = {
 type FormMode = "create" | "edit";
 
 export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
-  const api = useMemo(() => createApiClient(apiBaseUrl), [apiBaseUrl]);
+  const { http } = useDataProvider();
   const { user: currentUser } = useAuth();
   const { notify } = useToast();
   const [state, setState] = useState<UsersSectionState>(initialState);
@@ -66,7 +67,7 @@ export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
     }
 
     try {
-      const users = await api.get<User[]>("/users");
+      const users = await http.get<User[]>("/users");
 
       setState((current) => ({
         ...current,
@@ -84,7 +85,7 @@ export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
         error: message,
       }));
     }
-  }, [api, isAdmin]);
+  }, [http, isAdmin]);
 
   useEffect(() => {
     void loadUsers();
@@ -117,18 +118,18 @@ export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
 
     try {
       if (formMode === "create") {
-        await api.post<User>("/users", payload);
+        await http.post<User>("/users", payload);
         notify({
           type: "success",
-          title: "Usuario creado",
-          message: "El usuario se registro correctamente.",
+          title: t("users.createSuccess"),
+          message: t("users.createSuccessText"),
         });
       } else if (editingUser) {
-        await api.put<User>(`/users/${editingUser.id}`, payload);
+        await http.put<User>(`/users/${editingUser.id}`, payload);
         notify({
           type: "success",
-          title: "Usuario actualizado",
-          message: `Se actualizaron los datos de ${editingUser.name}.`,
+          title: t("users.updateSuccess"),
+          message: `${t("users.updateSuccessText")} ${editingUser.name}.`,
         });
       }
 
@@ -136,7 +137,7 @@ export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
       await loadUsers();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "No se pudo guardar el usuario.";
+        error instanceof Error ? error.message : t("users.createError");
 
       setState((current) => ({
         ...current,
@@ -145,7 +146,7 @@ export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
       }));
       notify({
         type: "error",
-        title: "No se pudo guardar el usuario",
+        title: t("users.createError"),
         message,
       });
       return;
@@ -182,16 +183,16 @@ export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
     }));
 
     try {
-      await api.delete(`/users/${pendingDeleteUser.id}`);
+      await http.delete(`/users/${pendingDeleteUser.id}`);
       await loadUsers();
       notify({
         type: "success",
-        title: "Usuario eliminado",
-        message: `Se elimino ${pendingDeleteUser.name}.`,
+        title: t("users.deleteSuccess"),
+        message: `${t("users.deleteSuccessText")} ${pendingDeleteUser.name}.`,
       });
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "No se pudo eliminar el usuario.";
+        error instanceof Error ? error.message : t("users.deleteError");
 
       setState((current) => ({
         ...current,
@@ -200,7 +201,7 @@ export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
       }));
       notify({
         type: "error",
-        title: "No se pudo eliminar el usuario",
+        title: t("users.deleteError"),
         message,
       });
       return;
@@ -225,21 +226,21 @@ export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
     }));
 
     try {
-      const result = await api.put<ResetPasswordResponse>(
+      const result = await http.put<ResetPasswordResponse>(
         `/users/${pendingResetUser.id}/reset-password`,
         {},
       );
       setResetPasswordResult(result.temporaryPassword ? result : null);
       notify({
         type: "success",
-        title: "Password reseteada",
+        title: t("users.resetPassword"),
         message: result.temporaryPassword
-          ? `Se genero una password temporal para ${pendingResetUser.username}.`
+          ? `${t("users.passwordReset")} ${pendingResetUser.username}.`
           : result.message,
       });
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "No se pudo resetear la password.";
+        error instanceof Error ? error.message : t("users.resetPassword");
 
       setState((current) => ({
         ...current,
@@ -248,7 +249,7 @@ export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
       }));
       notify({
         type: "error",
-        title: "No se pudo resetear la password",
+        title: t("users.resetPassword"),
         message,
       });
       return;
@@ -262,14 +263,14 @@ export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
   };
 
   if (state.loading) {
-    return <SectionLoader label="Cargando gestion de usuarios..." />;
+    return <SectionLoader label={`${t("loading.section")} ${t("users.list").toLowerCase()}...`} />;
   }
 
   if (!isAdmin) {
     return (
       <SectionNotice
-        title="Acceso restringido"
-        message="Esta seccion esta disponible unicamente para usuarios con rol admin."
+        title={t("common.error")}
+        message={t("users.onlyAdmin")}
         tone="warning"
       />
     );
@@ -278,7 +279,7 @@ export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
   return (
     <div className="space-y-6">
       {state.error && (
-        <SectionNotice title="Error" message={state.error} tone="error" />
+        <SectionNotice title={t("common.error")} message={state.error} tone="error" />
       )}
 
       <UserList
@@ -306,13 +307,13 @@ export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
 
       <ConfirmDialog
         open={Boolean(pendingDeleteUser)}
-        title="Eliminar usuario"
+        title={t("users.deleteConfirm")}
         description={
           pendingDeleteUser
-            ? `Vas a eliminar a ${pendingDeleteUser.name}. Esta accion no se puede deshacer.`
+            ? `${t("users.deleteConfirm")}: ${pendingDeleteUser.name}.`
             : ""
         }
-        confirmLabel="Eliminar usuario"
+        confirmLabel={t("users.deleteConfirm")}
         confirming={pendingDeleteUser ? state.deletingUserId === pendingDeleteUser.id : false}
         onCancel={() => setPendingDeleteUser(null)}
         onConfirm={() => void handleConfirmDelete()}
@@ -320,13 +321,13 @@ export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
 
       <ConfirmDialog
         open={Boolean(pendingResetUser)}
-        title="Resetear password"
+        title={t("users.resetPassword")}
         description={
           pendingResetUser
-            ? `Se generara una password temporal nueva para ${pendingResetUser.username}. La sesion actual de ese usuario se cerrara.`
+            ? `${t("users.passwordReset")}: ${pendingResetUser.username}.`
             : ""
         }
-        confirmLabel="Resetear password"
+        confirmLabel={t("users.resetPassword")}
         confirming={pendingResetUser ? state.resettingUserId === pendingResetUser.id : false}
         onCancel={() => setPendingResetUser(null)}
         onConfirm={() => void handleConfirmResetPassword()}
@@ -340,24 +341,24 @@ export default function UsersSection({ apiBaseUrl }: UsersSectionProps) {
         <section className="rounded-[28px] border border-white/10 bg-slate-950/95 p-6 shadow-panel">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-xs uppercase tracking-[0.24em] text-amber-200">Password temporal</p>
+              <p className="text-xs uppercase tracking-[0.24em] text-amber-200">{t("users.passwordReset")}</p>
               <h3 id="reset-password-result" className="mt-2 text-2xl font-semibold text-white">
-                Nueva credencial generada
+                {t("users.resetPassword")}
               </h3>
             </div>
 
             <MotionButton
-              aria-label="Cerrar modal de password temporal"
+              aria-label={t("common.close")}
               onClick={() => setResetPasswordResult(null)}
               className="rounded-2xl border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/5"
             >
-              Cerrar
+              {t("common.close")}
             </MotionButton>
           </div>
 
           <div className="mt-6 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-5">
             <p className="text-sm text-amber-50">
-              Esta password se muestra una sola vez. Usuario:{" "}
+              {t("users.passwordReset")}:{" "}
               <strong>{resetPasswordResult?.username}</strong>
             </p>
             <p className="mt-4 rounded-2xl bg-slate-950/70 px-4 py-3 font-mono text-lg font-semibold text-white">

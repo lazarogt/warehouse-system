@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 export const safeText = (value: unknown, fallback = "—") => {
   if (typeof value !== "string") {
     return fallback;
@@ -25,7 +27,7 @@ export const safeCurrency = (value: unknown, fallback = "$0.00") => {
   return `$${normalized.toFixed(2)}`;
 };
 
-export const safeDateTime = (value: unknown, fallback = "Fecha no disponible") => {
+export const safeDateTime = (value: unknown, fallback = `${t("common.date")} ${t("common.noData").toLowerCase()}`) => {
   if (typeof value !== "string" || !value.trim()) {
     return fallback;
   }
@@ -42,7 +44,7 @@ export const safeArray = <T,>(value: T[] | null | undefined) => {
   return Array.isArray(value) ? value : [];
 };
 
-export const safeTitle = (value: unknown, fallback = "Sin datos") => {
+export const safeTitle = (value: unknown, fallback = t("common.noData")) => {
   return safeText(value, fallback);
 };
 

@@ -4,10 +4,17 @@ import type {
   CreateProductPayload,
   CreateStockMovementPayload,
   CreateWarehousePayload,
+  DeactivateWarehousePayload,
+  DeactivateWarehouseResult,
+  DispatchProductPayload,
+  GetProductsPayload,
   GetStockMovementsPayload,
   GetWarehouseStockPayload,
   Product,
   StockMovement,
+  TransferStockPayload,
+  TransferStockResult,
+  UpdateWarehousePayload,
   UpdateProductStockPayload,
   SetWarehouseStockPayload,
   Warehouse,
@@ -16,8 +23,10 @@ import type {
 import type { DatabaseLogger } from "../db/database";
 import {
   DatabaseValidationError,
+  type DeactivateWarehouseResult as DeactivateWarehouseServiceResult,
   type ProductRecord,
   type StockMovementRecord,
+  type TransferStockResult as TransferStockServiceResult,
   type WarehouseDataService,
   type WarehouseRecord,
   type WarehouseStockRecord,
@@ -149,6 +158,49 @@ function assertStockMovementType(value: unknown): "in" | "out" {
   return value;
 }
 
+function assertStockMovementReason(value: unknown): "adjustment" | "dispatch" | "transfer" {
+  if (value !== "adjustment" && value !== "dispatch" && value !== "transfer") {
+    throw new IpcPayloadValidationError(
+      "reason must be one of: adjustment, dispatch, transfer.",
+    );
+  }
+
+  return value;
+}
+
+function assertOptionalTrimmedString(
+  fieldName: string,
+  value: unknown,
+  maxLength: number,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return assertTrimmedString(fieldName, value, maxLength);
+}
+
+function validateStockMovementMetadata(value: unknown) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const metadata = assertObjectPayload(value, "metadata");
+
+  return {
+    customer: assertOptionalTrimmedString("metadata.customer", metadata.customer, 160),
+    notes: assertOptionalTrimmedString("metadata.notes", metadata.notes, 500),
+    sourceWarehouseId:
+      metadata.sourceWarehouseId === undefined
+        ? undefined
+        : assertPositiveInteger("metadata.sourceWarehouseId", metadata.sourceWarehouseId),
+    targetWarehouseId:
+      metadata.targetWarehouseId === undefined
+        ? undefined
+        : assertPositiveInteger("metadata.targetWarehouseId", metadata.targetWarehouseId),
+  };
+}
+
 function assertOptionalIsoDate(fieldName: string, value: unknown): string | undefined {
   if (value === undefined) {
     return undefined;
@@ -184,8 +236,13 @@ function mapStockMovement(record: StockMovementRecord): StockMovement {
     productId: record.productId,
     warehouseId: record.warehouseId,
     type: record.type,
+    reason: record.reason,
     quantity: record.quantity,
+    metadata: record.metadata,
     date: record.date,
+    productName: record.productName,
+    productSku: record.productSku,
+    warehouseName: record.warehouseName,
   };
 }
 
@@ -194,6 +251,7 @@ function mapWarehouse(record: WarehouseRecord): Warehouse {
     id: record.id,
     name: record.name,
     location: record.location,
+    isActive: Boolean(record.isActive),
     createdAt: record.createdAt,
   };
 }
@@ -206,6 +264,25 @@ function mapWarehouseStock(record: WarehouseStockRecord): WarehouseStock {
   };
 }
 
+function mapDeactivateWarehouseResult(
+  record: DeactivateWarehouseServiceResult,
+): DeactivateWarehouseResult {
+  return {
+    warehouseId: record.warehouseId,
+  };
+}
+
+function mapTransferStockResult(record: TransferStockServiceResult): TransferStockResult {
+  return {
+    sourceId: record.sourceId,
+    targetId: record.targetId,
+    productId: record.productId,
+    quantity: record.quantity,
+    movedAt: record.movedAt,
+    movementIds: record.movementIds,
+  };
+}
+
 function mapWarehouseError(error: unknown): ApiResponse<never> {
   const sqliteError = error as SqliteLikeError | undefined;
 
@@ -214,10 +291,10 @@ function mapWarehouseError(error: unknown): ApiResponse<never> {
   }
 
   if (sqliteError?.code?.startsWith("SQLITE_CONSTRAINT")) {
-    return errorResponse("CONFLICT", "The requested change violates a database constraint.");
+    return errorResponse("CONFLICT", "El cambio no se pudo guardar por un conflicto de datos.");
   }
 
-  return errorResponse("INTERNAL_ERROR", "An unexpected IPC error occurred.");
+  return errorResponse("INTERNAL_ERROR", "Ocurrio un error inesperado.");
 }
 
 function wrapHandler<TPayload, TResult>(
@@ -263,6 +340,17 @@ function validateCreateWarehousePayload(payload: unknown): CreateWarehousePayloa
   };
 }
 
+function validateGetProductsPayload(payload: unknown): GetProductsPayload {
+  const value = assertOptionalObjectPayload(payload);
+
+  return {
+    warehouseId:
+      value.warehouseId === undefined
+        ? undefined
+        : assertPositiveInteger("warehouseId", value.warehouseId),
+  };
+}
+
 function validateUpdateProductStockPayload(payload: unknown): UpdateProductStockPayload {
   const value = assertObjectPayload(payload, "updateProductStock");
 
@@ -273,6 +361,24 @@ function validateUpdateProductStockPayload(payload: unknown): UpdateProductStock
       value.warehouseId === undefined
         ? undefined
         : assertPositiveInteger("warehouseId", value.warehouseId),
+  };
+}
+
+function validateUpdateWarehousePayload(payload: unknown): UpdateWarehousePayload {
+  const value = assertObjectPayload(payload, "updateWarehouse");
+
+  return {
+    warehouseId: assertPositiveInteger("warehouseId", value.warehouseId),
+    name: assertTrimmedString("name", value.name, 120),
+    location: assertTrimmedString("location", value.location, 200),
+  };
+}
+
+function validateDeactivateWarehousePayload(payload: unknown): DeactivateWarehousePayload {
+  const value = assertObjectPayload(payload, "deactivateWarehouse");
+
+  return {
+    warehouseId: assertPositiveInteger("warehouseId", value.warehouseId),
   };
 }
 
@@ -322,6 +428,32 @@ function validateCreateStockMovementPayload(payload: unknown): CreateStockMoveme
     type: assertStockMovementType(value.type),
     quantity: assertPositiveInteger("quantity", value.quantity),
     date: assertOptionalIsoDate("date", value.date),
+    reason:
+      value.reason === undefined ? undefined : assertStockMovementReason(value.reason),
+    metadata: validateStockMovementMetadata(value.metadata),
+  };
+}
+
+function validateDispatchProductPayload(payload: unknown): DispatchProductPayload {
+  const value = assertObjectPayload(payload, "dispatchProduct");
+
+  return {
+    warehouseId: assertPositiveInteger("warehouseId", value.warehouseId),
+    productId: assertPositiveInteger("productId", value.productId),
+    quantity: assertPositiveInteger("quantity", value.quantity),
+    customer: assertTrimmedString("customer", value.customer, 160),
+    notes: assertOptionalTrimmedString("notes", value.notes, 500),
+  };
+}
+
+function validateTransferStockPayload(payload: unknown): TransferStockPayload {
+  const value = assertObjectPayload(payload, "transferStock");
+
+  return {
+    sourceId: assertPositiveInteger("sourceId", value.sourceId),
+    targetId: assertPositiveInteger("targetId", value.targetId),
+    productId: assertPositiveInteger("productId", value.productId),
+    quantity: assertPositiveInteger("quantity", value.quantity),
   };
 }
 
@@ -334,8 +466,9 @@ export function registerWarehouseIpcHandlers(
 
   registrar.handle(
     WAREHOUSE_IPC_CHANNELS.getProducts,
-    wrapHandler(logger, "getProducts", () => {
-      return warehouseDataService.listProducts().map(mapProduct);
+    wrapHandler(logger, "getProducts", (payload) => {
+      const validatedPayload = validateGetProductsPayload(payload);
+      return warehouseDataService.listProducts(validatedPayload).map(mapProduct);
     }),
   );
 
@@ -348,10 +481,36 @@ export function registerWarehouseIpcHandlers(
   );
 
   registrar.handle(
+    WAREHOUSE_IPC_CHANNELS.dispatchProduct,
+    wrapHandler(logger, "dispatchProduct", (payload) => {
+      const validatedPayload = validateDispatchProductPayload(payload);
+      return mapStockMovement(warehouseDataService.dispatchProduct(validatedPayload));
+    }),
+  );
+
+  registrar.handle(
     WAREHOUSE_IPC_CHANNELS.createWarehouse,
     wrapHandler(logger, "createWarehouse", (payload) => {
       const validatedPayload = validateCreateWarehousePayload(payload);
       return mapWarehouse(warehouseDataService.createWarehouse(validatedPayload));
+    }),
+  );
+
+  registrar.handle(
+    WAREHOUSE_IPC_CHANNELS.updateWarehouse,
+    wrapHandler(logger, "updateWarehouse", (payload) => {
+      const validatedPayload = validateUpdateWarehousePayload(payload);
+      return mapWarehouse(warehouseDataService.updateWarehouse(validatedPayload));
+    }),
+  );
+
+  registrar.handle(
+    WAREHOUSE_IPC_CHANNELS.deactivateWarehouse,
+    wrapHandler(logger, "deactivateWarehouse", (payload) => {
+      const validatedPayload = validateDeactivateWarehousePayload(payload);
+      return mapDeactivateWarehouseResult(
+        warehouseDataService.deactivateWarehouse(validatedPayload.warehouseId),
+      );
     }),
   );
 
@@ -401,6 +560,14 @@ export function registerWarehouseIpcHandlers(
     wrapHandler(logger, "setWarehouseStock", (payload) => {
       const validatedPayload = validateSetWarehouseStockPayload(payload);
       return mapWarehouseStock(warehouseDataService.setWarehouseStock(validatedPayload));
+    }),
+  );
+
+  registrar.handle(
+    WAREHOUSE_IPC_CHANNELS.transferStock,
+    wrapHandler(logger, "transferStock", (payload) => {
+      const validatedPayload = validateTransferStockPayload(payload);
+      return mapTransferStockResult(warehouseDataService.transferStock(validatedPayload));
     }),
   );
 
